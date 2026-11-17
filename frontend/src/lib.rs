@@ -1,4 +1,12 @@
 pub mod app;
+mod actlog;
+mod method_select;
+mod search;
+mod steps_util;
+mod storage;
+mod timefmt;
+mod types;
+mod util;
 mod mock_view;
 mod logic;
 

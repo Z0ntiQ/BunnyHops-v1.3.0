@@ -1,7 +1,5 @@
 use leptos::prelude::*;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -11,427 +9,18 @@ use crate::mock_view::ProxyView;
 use crate::stream::{do_stream, err_message, is_abort_err, RespUpdate};
 use crate::ui::*;
 
-const LS_STEPS: &str = "hoplite.steps";
-const LS_VARS: &str = "hoplite.vars";
-const LS_SCALE_IDX: &str = "hoplite.scaleIdx";
-const LS_LOG_H: &str = "hoplite.logH";
-const LS_SAVED: &str = "hoplite.saved";
-const LS_GROUPS: &str = "hoplite.groups";
 
-/* ---------- localStorage ---------- */
-
-fn ls_get(key: &str) -> Option<String> {
-    web_sys::window()?
-        .local_storage()
-        .ok()??
-        .get_item(key)
-        .ok()?
-}
-
-/// Максимальная высота панели журнала: от нижнего края окна (отступ 30px)
-/// до нижней границы панели табов запроса (.tabs).
-fn tab_bottom_gap() -> Option<i32> {
-    let win = web_sys::window()?;
-    let doc = win.document()?;
-    let inner_h = win.inner_height().ok()?.as_f64()? as i32;
-    let el = doc.query_selector(".tabs").ok().flatten()?;
-    let rect = el.get_bounding_client_rect();
-    Some((inner_h - 30 - rect.bottom() as i32).max(60))
-}
-
-pub(crate) fn ls_set(key: &str, value: &str) {
-    if let Some(Some(store)) = web_sys::window().and_then(|w| w.local_storage().ok()) {
-        let _ = store.set_item(key, value);
-    }
-}
-
-fn ls_del(key: &str) {
-    if let Some(Some(store)) = web_sys::window().and_then(|w| w.local_storage().ok()) {
-        let _ = store.remove_item(key);
-    }
-}
-
-fn load_steps() -> Vec<Step> {
-    ls_get(LS_STEPS)
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn load_vars() -> Vec<KvRow> {
-    ls_get(LS_VARS)
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn load_saved() -> Vec<SavedReq> {
-    ls_get(LS_SAVED)
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn load_groups() -> Vec<SavedGroup> {
-    ls_get(LS_GROUPS)
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-async fn fetch_api_calls() -> Vec<ApiCall> {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return Vec::new(),
-    };
-    let promise = win.fetch_with_str("/api/automation-rules");
-    let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
-        return Vec::new();
-    };
-    let Ok(resp) = val.dyn_into::<web_sys::Response>() else {
-        return Vec::new();
-    };
-    let Ok(text_promise) = resp.text() else {
-        return Vec::new();
-    };
-    let Ok(txt) = wasm_bindgen_futures::JsFuture::from(text_promise).await else {
-        return Vec::new();
-    };
-    serde_json::from_str(&txt.as_string().unwrap_or_default()).unwrap_or_default()
-}
-
-fn ts_short() -> String {
-    let d = js_sys::Date::new_0();
-    format!("{:02}:{:02}:{:02}", d.get_hours(), d.get_minutes(), d.get_seconds())
-}
-
-fn fmt_ts(ts: u64) -> String {
-    let d = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
-    js_sys::Date::to_time_string(&d).into()
-}
-
-/// Время ЧЧ:ММ:СС из серверного unix-времени (для панели единого журнала).
-fn ts_at(ts: u64) -> String {
-    let d = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
-    format!("{:02}:{:02}:{:02}", d.get_hours(), d.get_minutes(), d.get_seconds())
-}
-
-/// Единый логер: событие UI уходит в серверный журнал (POST /api/log).
-async fn post_log(msg: &str) {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return,
-    };
-    let init = web_sys::RequestInit::new();
-    init.set_method("POST");
-    init.set_body(&JsValue::from_str(
-        &serde_json::json!({"msg": msg}).to_string(),
-    ));
-    let Ok(req) = web_sys::Request::new_with_str_and_init("/api/log", &init) else {
-        return;
-    };
-    let promise = win.fetch_with_request(&req);
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-}
-
-#[derive(serde::Deserialize)]
-struct LogItem {
-    ts: u64,
-    area: String,
-    action: String,
-    #[serde(default)]
-    details: serde_json::Value,
-}
-
-fn render_log_item(it: &LogItem) -> String {
-    if it.area == "ui" && it.action == "note" {
-        let msg = it.details.get("msg").and_then(serde_json::Value::as_str).unwrap_or("");
-        return format!("{} {}", ts_at(it.ts), msg);
-    }
-    let det = match &it.details {
-        serde_json::Value::Object(map) => map
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v.as_str().unwrap_or(&v.to_string())))
-            .collect::<Vec<_>>()
-            .join(" "),
-        _ => String::new(),
-    };
-    format!("{} [{}] {} {}", ts_at(it.ts), it.area, it.action, det)
-        .trim_end()
-        .to_string()
-}
-
-/// Серверный журнал действий, старые первыми (панель показывает реверсом).
-async fn fetch_action_log() -> Vec<String> {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return Vec::new(),
-    };
-    let promise = win.fetch_with_str("/api/action-log");
-    let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
-        return Vec::new();
-    };
-    let Ok(resp) = val.dyn_into::<web_sys::Response>() else {
-        return Vec::new();
-    };
-    let Ok(text_promise) = resp.text() else {
-        return Vec::new();
-    };
-    let Ok(txt) = wasm_bindgen_futures::JsFuture::from(text_promise).await else {
-        return Vec::new();
-    };
-    #[derive(serde::Deserialize)]
-    struct LogResp {
-        items: Vec<LogItem>,
-    }
-    let Ok(doc) = serde_json::from_str::<LogResp>(&txt.as_string().unwrap_or_default()) else {
-        return Vec::new();
-    };
-    let mut lines: Vec<String> = doc.items.iter().map(render_log_item).collect();
-    lines.reverse();
-    lines
-}
-
-fn sleep_ms_local(ms: i32) -> impl std::future::Future<Output = ()> {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let _ = web_sys::window()
-            .expect("no window")
-            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
-    });
-    async move {
-        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-    }
-}
-
-fn load_scale_idx() -> usize {
-    ls_get(LS_SCALE_IDX)
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|v| *v < SCALES.len())
-        .unwrap_or(DEFAULT_SCALE_IDX)
-}
-
-fn js_now() -> f64 {
-    js_sys::Date::now()
-}
-
-fn new_id() -> String {
-    format!("s{}{}", js_now() as u64, rand_u32())
-}
-
-fn rand_u32() -> u32 {
-    js_sys::Math::random().mul_add(1e9, 0.0) as u32
-}
-
-/* ---------- model ----------
-
-#[derive(Clone, Debug, PartialEq)]
-struct RespState {
-    status: u16,
-    status_text: String,
-    headers: Vec<(String, String)>,
-    content_type: String,
-    final_url: String,
-    body_text: String,
-    bytes: u64,
-    time_ms: f64,
-    started_at: f64,
-    is_textual: bool,
-    streaming: bool,
-    cancelled: bool,
-    image_blob_url: Option<String>,
-}
-*/
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Step {
-    pub id: String,
-    pub method: String,
-    pub url: String,
-    #[serde(default)]
-    pub body: String,
-    #[serde(default)]
-    pub headers: Vec<KvRow>,
-    #[serde(default)]
-    pub capture_name: String,
-    #[serde(default = "default_capture_path")]
-    pub capture_path: String,
-    // статус/результат live-прогона в localStorage не пишутся (как в React-версии)
-    #[serde(skip, default = "default_status")]
-    pub status: String,
-    #[serde(skip, default)]
-    pub result: Option<StepResult>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-struct SavedReq {
-    id: String,
-    name: String,
-    method: String,
-    url: String,
-    #[serde(default)]
-    headers: Vec<KvRow>,
-    #[serde(default)]
-    body: String,
-    // слепок последнего ответа для переиспользования
-    #[serde(default)]
-    resp_status: u16,
-    #[serde(default)]
-    resp_body: String,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
-struct ApiCall {
-    id: String,
-    method: String,
-    url: String,
-    #[serde(default)]
-    headers: Vec<KvRow>,
-    #[serde(default)]
-    body: String,
-    #[serde(default)]
-    status: u16,
-    #[serde(default)]
-    ts: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-struct SavedGroup {
-    id: String,
-    num: u32,
-    name: String,
-    tabs: Vec<SavedReq>,
-}
-
-fn default_status() -> String {
-    "idle".to_string()
-}
-
-fn default_capture_path() -> String {
-    "$.token".to_string()
-}
-
-#[derive(Clone, Debug)]
-struct RespState {
-    status: u16,
-    status_text: String,
-    headers: Vec<(String, String)>,
-    content_type: String,
-    final_url: String,
-    body_text: String,
-    bytes: u64,
-    time_ms: f64,
-    started_at: f64,
-    is_textual: bool,
-    streaming: bool,
-    cancelled: bool,
-    image_blob_url: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct LineData {
-    hit: bool,
-    has_error: bool,
-    segs: Vec<Seg>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct SearchData {
-    total: usize,
-    lines: Vec<LineData>,
-}
-
-
-/* ---------- цветной выпадающий список методов — стиль Spring Dropdown ---------- */
-/// Цвет точки-маркера метода (тёмный фон, яркие тона как в референсе).
-fn method_dot_color(m: &str) -> &'static str {
-    match m {
-        "GET" => "#21c363",
-        "POST" => "#ff9f0a",
-        "PUT" => "#3ec9ff",
-        "PATCH" => "#c69bff",
-        "DELETE" => "#ff5a5f",
-        "HEAD" => "#7aa2c9",
-        _ => "#9a9a9a",
-    }
-}
+use crate::actlog::*;
+use crate::method_select::*;
+use crate::search::*;
+use crate::steps_util::*;
+use crate::storage::*;
+use crate::timefmt::*;
+use crate::types::*;
+use crate::util::*;
 
 #[component]
-pub fn MethodSelect(
-    get_method: Callback<(), String>,
-    set_method: Callback<String>,
-) -> impl IntoView {
-    let open = create_rw_signal(false);
-    let current = move || get_method.run(());
-    let cur_color = move || method_dot_color(&current());
-    view! {
-        <div
-            class=move || format!("method-picker{}", if open.get() { " is-open" } else { "" })
-            style=("--mc", cur_color)
-        >
-            <button
-                type="button"
-                class="method-select"
-                aria-haspopup="listbox"
-                aria-expanded=move || open.get().to_string()
-                on:click=move |_| open.update(|o| *o = !*o)
-            >
-                <span class="method-dot"></span>
-                <span class="method-name">{move || current()}</span>
-                <svg class="method-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
-            <Show when=move || open.get()>
-                <div class="method-menu-backdrop" on:click=move |_| open.set(false)></div>
-                <div class="method-menu" role="listbox" aria-label="Метод запроса">
-                    {METHODS
-                        .iter()
-                        .map(|m| {
-                            let m = (*m).to_string();
-                            let cls = {
-                                let m = m.clone();
-                                move || {
-                                    if current() == m {
-                                        "method-menu-item is-cur".to_string()
-                                    } else {
-                                        "method-menu-item".to_string()
-                                    }
-                                }
-                            };
-                            let dot_color = method_dot_color(&m);
-                            let check = {
-                                let m = m.clone();
-                                move || if current() == m { "✓" } else { "" }
-                            };
-                            let pick = {
-                                let m = m.clone();
-                                move |_| {
-                                    set_method.run(m.clone());
-                                    open.set(false);
-                                }
-                            };
-                            view! {
-                                <button type="button" class=cls style=("--mc", move || dot_color) on:click=pick>
-                                    <span class="method-dot"></span>
-                                    <span class="method-menu-name">{m.clone()}</span>
-                                    <span class="method-check">{check}</span>
-                                </button>
-                            }
-                        })
-                        .collect::<Vec<_>>()}
-                </div>
-            </Show>
-        </div>
-    }
-}
 
-/* ---------- живой поиск по экрану (реализация — window.hopSearch в index.html) ---------- */
-
-fn hop_search(q: &str) -> i64 {
-    let Some(win) = web_sys::window() else { return 0 };
-    let Ok(f) = js_sys::Reflect::get(&win, &JsValue::from_str("hopSearch")) else { return 0 };
-    let Ok(f) = f.dyn_into::<js_sys::Function>() else { return 0 };
-    match f.call1(&JsValue::NULL, &JsValue::from_str(q)) {
-        Ok(v) => v.as_f64().map(|x| x as i64).unwrap_or(0),
-        Err(_) => 0,
-    }
-}
-
-#[component]
 pub fn App() -> impl IntoView {
     /* ---------- state (зеркало useState из App.jsx) ---------- */
     let method = create_rw_signal("GET".to_string());
@@ -908,7 +497,7 @@ pub fn App() -> impl IntoView {
 
     /* ---------- send / stop ---------- */
     let send = Callback::new(move |_: ()| {
-        let target = tpl_global(&url.get_untracked().trim(), &vars_map.get_untracked());
+        let target = tpl_global(url.get_untracked().trim(), &vars_map.get_untracked());
         if target.is_empty() || loading.get_untracked() || running.get_untracked() {
             return;
         }
@@ -1334,7 +923,7 @@ pub fn App() -> impl IntoView {
             let opts = web_sys::ScrollIntoViewOptions::new();
             opts.set_behavior(web_sys::ScrollBehavior::Auto);
             opts.set_block(web_sys::ScrollLogicalPosition::Center);
-            let _ = el.scroll_into_view_with_scroll_into_view_options(&opts);
+            el.scroll_into_view_with_scroll_into_view_options(&opts);
         },
         false,
     );
@@ -1365,7 +954,7 @@ pub fn App() -> impl IntoView {
             let opts = web_sys::ScrollIntoViewOptions::new();
             opts.set_behavior(web_sys::ScrollBehavior::Smooth);
             opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            let _ = el.scroll_into_view_with_scroll_into_view_options(&opts);
+            el.scroll_into_view_with_scroll_into_view_options(&opts);
         },
         false,
     );
@@ -1729,14 +1318,14 @@ pub fn App() -> impl IntoView {
                         <button class=move || if tab.get() == "steps" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("steps".to_string())>
                             "Scenario"
-                            <Show when={move || steps.get().len() != 0}>
+                            <Show when={move || !steps.get().is_empty()}>
                                 <span class="tab-count">{move || steps.get().len()}</span>
                             </Show>
                         </button>
                         <button class=move || if tab.get() == "vars" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("vars".to_string())>
                             "Vars"
-                            <Show when={move || vars_map.get().len() != 0}>
+                            <Show when={move || !vars_map.get().is_empty()}>
                                 <span class="tab-count">{move || vars_map.get().len()}</span>
                             </Show>
                         </button>
@@ -1843,7 +1432,7 @@ pub fn App() -> impl IntoView {
                                                         <span class="streaming-badge mini">{format!("● шаг {}", i + 1)}</span>
                                                     </Show>
                                                     <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "ok"}>
-                                                        {move || step_at_opt(&steps, i, |s| s.result.clone()).flatten().map(|r| result_chip(r))}
+                                                        {move || step_at_opt(&steps, i, |s| s.result.clone()).flatten().map(result_chip)}
                                                     </Show>
                                                     <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "fail"}>
                                                         {move || match step_at_opt(&steps, i, |s| s.result.clone()).flatten() {
@@ -1987,7 +1576,7 @@ pub fn App() -> impl IntoView {
                                 }
                             }}>
                                 <span class="meta-item redirect" title="После редиректов">
-                                    {move || format!("→ {}", response.get().and_then(|r| Some(r.final_url)).unwrap_or_default())}
+                                    {move || format!("→ {}", response.get().map(|r| r.final_url).unwrap_or_default())}
                                 </span>
                             </Show>
                             <Show when={move || {
@@ -2094,7 +1683,7 @@ pub fn App() -> impl IntoView {
                                                                 }
                                                                 cls
                                                             }}>
-                                                                {line.segs.clone().into_iter().enumerate().map(|(si, seg)| match seg.mi {
+                                                                {line.segs.clone().into_iter().enumerate().map(|(_si, seg)| match seg.mi {
                                                                     Some(mi) => view! {
                                                                         <mark data-mi={mi}
                                                                             class={move || if cur_match.get() == mi { "match current" } else { "match" }}>
@@ -2329,63 +1918,3 @@ pub fn App() -> impl IntoView {
 }
 
 /* помещаются ли все чипы облака в одну строку хедера */
-fn cloud_overflow() -> bool {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return false;
-    };
-    match doc.query_selector(".tab-cloud") {
-        Ok(Some(el)) => el.scroll_width() > el.client_width() + 1,
-        _ => false,
-    }
-}
-
-/* ---------- small helpers for reactive step fields ---------- */
-
-fn step_at(steps: &RwSignal<Vec<Step>>, i: usize, f: impl FnOnce(&Step) -> String) -> String {
-    steps.get().get(i).map(|s| f(s)).unwrap_or_default()
-}
-
-fn step_at_opt<T: Clone>(steps: &RwSignal<Vec<Step>>, i: usize, f: impl FnOnce(&Step) -> T) -> Option<T> {
-    steps.get().get(i).map(|s| f(s))
-}
-
-fn update_step_at(steps: &RwSignal<Vec<Step>>, i: usize, f: impl FnOnce(&mut Step)) {
-    steps.update(|v| { if let Some(s) = v.get_mut(i) { f(s); } });
-}
-
-fn update_step(steps: &RwSignal<Vec<Step>>, id: &str, f: impl FnOnce(&mut Step)) {
-    steps.update(|v| {
-        if let Some(s) = v.iter_mut().find(|s| s.id == id) {
-            f(s);
-        }
-    });
-}
-
-
-fn step_opt<T: Clone>(
-    steps: &RwSignal<Vec<Step>>,
-    id: &str,
-    f: impl FnOnce(&Step) -> T,
-) -> Option<T> {
-    steps.get().into_iter().find(|s| s.id == id).map(|s| f(&s))
-}
-
-fn step_str(
-    steps: &RwSignal<Vec<Step>>,
-    id: &str,
-    f: impl FnOnce(&Step) -> String,
-) -> String {
-    step_opt(steps, id, f).unwrap_or_default()
-}
-
-fn memo_from_signal(sig: RwSignal<bool>) -> Memo<bool> {
-    Memo::new(move |_| sig.get())
-}
-
-async fn navigator_clipboard_write_text(text: &str) -> Result<(), JsValue> {
-    let win = web_sys::window().ok_or(JsValue::UNDEFINED)?;
-    let clipboard = win.navigator().clipboard();
-    let promise = clipboard.write_text(text);
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-    Ok(())
-}

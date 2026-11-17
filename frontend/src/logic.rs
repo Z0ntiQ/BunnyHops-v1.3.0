@@ -224,7 +224,7 @@ pub fn extract_by_path(obj: &serde_json::Value, path: &str) -> Result<String, St
         .or_else(|| path.strip_prefix('$'))
         .unwrap_or(path);
     let parts: Vec<String> = rest
-        .split(|c: char| c == '.' || c == '[' || c == ']' || c == '"' || c == '\'')
+        .split(['.', '[', ']', '"', '\''])
         .filter(|p| !p.is_empty())
         .map(|p| p.to_string())
         .collect();

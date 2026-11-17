@@ -82,7 +82,7 @@ pub fn start_log_drag(ev: &web_sys::PointerEvent, lh: RwSignal<i32>) {
     let (mv2, up2) = (mv.clone(), up.clone());
     let up_c = Closure::wrap(Box::new(move |_: web_sys::PointerEvent| {
         drag_start.set(None);
-        crate::app::ls_set("hoplite.logH", &lh.get_untracked().to_string());
+        crate::storage::ls_set("hoplite.logH", &lh.get_untracked().to_string());
         if let Some(w) = web_sys::window() {
             if let Some(m) = mv2.borrow().as_ref() {
                 let _ = w.remove_event_listener_with_callback(
@@ -138,7 +138,7 @@ pub fn KvEditor(
 
     // Открытие: наполнить поле из строк, показать панель, увести фокус в textarea.
     let open_bulk = {
-        let get_rows = get_rows.clone();
+        let get_rows = get_rows;
         move |_: leptos::ev::MouseEvent| {
             bulk_text.set(kv_to_text(&get_rows.run(())));
             bulk_open.set(true);
@@ -362,7 +362,7 @@ pub fn CopyButton(
             title=move || if ok.get() { "Скопировано!".to_string() } else { title.to_string() }
             on:click=move |_| {
                 let text = get_text.run(());
-                let ok_c = on_copied.clone();
+                let ok_c = on_copied;
                 wasm_bindgen_futures::spawn_local(async move {
                     if copy_text(&text).await {
                         ok_c.run(());

@@ -140,7 +140,7 @@ pub async fn do_stream(
         .get_reader()
         .dyn_into()?;
     let decoder = TextDecoder::new().unwrap();
-    let mut opts = TextDecodeOptions::new();
+    let opts = TextDecodeOptions::new();
     opts.set_stream(true);
 
     let mut bytes: u64 = 0;
@@ -178,14 +178,13 @@ pub async fn do_stream(
 
     let time_ms = (js_now() - start).round();
     let mut image_blob_url = None;
-    if !is_textual {
-        if content_type.starts_with("image/") {
+    if !is_textual
+        && content_type.starts_with("image/") {
             let mut initb = BlobPropertyBag::new();
             initb.type_(&if content_type.is_empty() { "application/octet-stream".to_string() } else { content_type.clone() });
             let blob = Blob::new_with_u8_array_sequence_and_options(&binary_chunks, &initb).unwrap();
             image_blob_url = Some(web_sys::Url::create_object_url_with_blob(&blob).unwrap());
         }
-    }
 
     Ok(StreamOutcome {
         network_error: false,

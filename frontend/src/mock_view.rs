@@ -419,13 +419,10 @@ pub fn ProxyView() -> impl IntoView {
             if let Some(name) = selected_profile.get() {
                 if polling_active.get() {
                     spawn_local(async move {
-                        match fetch_json_get(&format!("/api/mock/traffic?name={}", name)).await {
-                            Ok(v) => {
-                                if let Some(arr) = v.get("traffic").and_then(|x| x.as_array()) {
-                                    traffic.set(arr.clone());
-                                }
+                        if let Ok(v) = fetch_json_get(&format!("/api/mock/traffic?name={}", name)).await {
+                            if let Some(arr) = v.get("traffic").and_then(|x| x.as_array()) {
+                                traffic.set(arr.clone());
                             }
-                            Err(_) => {}
                         }
                     });
                 }
@@ -444,7 +441,7 @@ pub fn ProxyView() -> impl IntoView {
         }));
     }
 
-    let on_profile_change = move |ev: web_sys::Event| {
+    let _on_profile_change = move |ev: web_sys::Event| {
         let val = input_value(ev);
         let mut pd = profile_data.get();
         if let Some(obj) = pd.as_object_mut() {
@@ -579,7 +576,7 @@ pub fn ProxyView() -> impl IntoView {
                         key=|p| {
                             let name = p.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
                             let running = p.get("running").and_then(|x| x.as_bool()).unwrap_or(false);
-                            let cnt = rules_count_of(&p);
+                            let cnt = rules_count_of(p);
                             format!("{name}:{running}:{cnt}")
                         }
                         children=move |p| {
