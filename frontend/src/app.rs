@@ -223,32 +223,10 @@ pub fn App() -> impl IntoView {
         if u.trim().is_empty() {
             return;
         }
-        // дубликат: метод+url+заголовки+тело совпадают с уже сохранённой вкладкой
-        {
-            let m = method.get_untracked();
-            let h = headers.get_untracked();
-            let b = body.get_untracked();
-            let dup = saved.get_untracked().into_iter().any(|r| {
-                r.method == m && r.url == u && r.headers == h && r.body == b
-            });
-            if dup {
-                modal_err.set("\u{26a0} Такая вкладка уже сохранена — это дубликат.".to_string());
-                return;
-            }
-            modal_err.set(String::new());
-        }
+        let m = method.get_untracked();
+        let h = headers.get_untracked();
+        let b = body.get_untracked();
         let typed = modal_name.get_untracked().trim().to_string();
-        let name = if !typed.is_empty() {
-            typed
-        } else {
-            let base = split_url(&u).base;
-            let name = base
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .trim_end_matches('/')
-                .to_string();
-            if name.is_empty() { base } else { name }
-        };
         let snap = response.get_untracked().unwrap_or(RespState {
             status: 0,
             status_text: String::new(),
@@ -264,19 +242,70 @@ pub fn App() -> impl IntoView {
             cancelled: false,
             image_blob_url: None,
         });
+        let resp_body = if snap.is_textual { snap.body_text.clone() } else { String::new() };
+        let mut list = saved.get_untracked();
+        // редактор привязан к открытой вкладке и нового имени не ввели:
+        // явное сохранение обновляет эту вкладку на месте
+        if typed.is_empty() {
+            if let Some(id) = active_tab.get_untracked() {
+                if let Some(i) = list.iter().position(|r| r.id == id) {
+                    let updated = SavedReq {
+                        id: id.clone(),
+                        name: list[i].name.clone(),
+                        method: m.clone(),
+                        url: u.clone(),
+                        headers: h.clone(),
+                        body: b.clone(),
+                        resp_status: snap.status,
+                        resp_body,
+                    };
+                    list[i] = updated;
+                    saved.set(list);
+                    modal_open.set(false);
+                    return;
+                }
+            }
+        }
+        // новая вкладка: занятое имя — отдельная ошибка
+        if !typed.is_empty() && list.iter().any(|r| r.name == typed) {
+            modal_err.set("\u{26a0} Вкладка с таким именем уже есть — выбери другое.".to_string());
+            return;
+        }
+        // дубликат: метод+url+заголовки+тело совпадают с уже сохранённой вкладкой
+        if let Some(r) = list
+            .iter()
+            .find(|r| r.method == m && r.url == u && r.headers == h && r.body == b)
+        {
+            modal_err.set(format!(
+                "\u{26a0} Запрос полностью совпадает с вкладкой «{}» — тот же метод, URL, заголовки и тело.",
+                r.name
+            ));
+            return;
+        }
+        modal_err.set(String::new());
+        let name = if !typed.is_empty() {
+            typed
+        } else {
+            let base = split_url(&u).base;
+            let name = base
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/')
+                .to_string();
+            if name.is_empty() { base } else { name }
+        };
         let item = SavedReq {
             id: new_id(),
             name,
-            method: method.get_untracked(),
+            method: m,
             url: u,
-            headers: headers.get_untracked(),
-            body: body.get_untracked(),
+            headers: h,
+            body: b,
             resp_status: snap.status,
-            resp_body: if snap.is_textual { snap.body_text.clone() } else { String::new() },
+            resp_body,
         };
         logit(format!("\u{ff0b} \u{432}\u{43a}\u{43b}\u{430}\u{434}\u{43a}\u{430} \u{00ab}{}\u{00bb} \u{441}\u{43e}\u{445}\u{440}\u{430}\u{43d}\u{435}\u{43d}\u{430}", item.name));
         let new_id_ = item.id.clone();
-        let mut list = saved.get_untracked();
         list.insert(0, item);
         saved.set(list);
         active_tab.set(Some(new_id_));
@@ -407,17 +436,14 @@ pub fn App() -> impl IntoView {
     });
     refresh_api.run(());
 
-    /* автосохранение: любое изменение пишется в активную вкладку, чип вспыхивает */
+    /* автосохранение ответа: отклик пишется в активную вкладку, чип вспыхивает.
+       Запрос (метод/URL/заголовки/тело) во вкладку не пишем: иначе любое
+       правка после загрузки вкладки молча перезаписала бы сохранённый запрос,
+       а «сохранить как новую» всегда давало бы ложный дубликат. */
     let _ = Effect::watch(
         move || {
             let resp = response.get();
-            (
-                method.get(),
-                url.get(),
-                headers.get(),
-                body.get(),
-                resp.map(|r| (r.status, r.is_textual, r.body_text, r.streaming)),
-            )
+            resp.map(|r| (r.status, r.is_textual, r.body_text.clone(), r.streaming))
         },
         move |st, prev, _| {
             if prev.is_none() {
@@ -425,7 +451,7 @@ pub fn App() -> impl IntoView {
             }
             let Some(id) = active_tab.get_untracked() else { return };
             let (status, is_textual, body_text, streaming) =
-                st.4.clone().unwrap_or((0, false, String::new(), false));
+                st.clone().unwrap_or((0, false, String::new(), false));
             if streaming {
                 return;
             }
@@ -435,14 +461,9 @@ pub fn App() -> impl IntoView {
                 return;
             };
             let updated = SavedReq {
-                id: id.clone(),
-                name: list[i].name.clone(),
-                method: st.0.clone(),
-                url: st.1.clone(),
-                headers: st.2.clone(),
-                body: st.3.clone(),
                 resp_status: status,
                 resp_body: if is_textual { body_text } else { String::new() },
+                ..list[i].clone()
             };
             if updated == list[i] {
                 return;
