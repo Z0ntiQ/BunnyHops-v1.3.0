@@ -1397,8 +1397,18 @@ pub fn App() -> impl IntoView {
                                 value_placeholder="Value"
                                 example_key="token"
                                 example_value="2f9c8e4d"
-                                url_preview=url
-                                empty_hint="Пример. Клик по строке добавит параметр; включённые непустые параметры попадут в URL после «?»"
+                                preview_label="URL с этим параметром:"
+                                preview=Callback::new(move |_: ()| {
+                                    let base = url.get();
+                                    let base = if base.trim().is_empty() {
+                                        "https://example.com/api/data".to_string()
+                                    } else {
+                                        base
+                                    };
+                                    let sep = if base.contains('?') { '&' } else { '?' };
+                                    format!("{base}{sep}token=2f9c8e4d")
+                                })
+                                empty_hint="Клик по строке — добавить"
                             />
                         </Show>
                         <Show when={move || tab.get() == "headers"}>
@@ -1407,6 +1417,11 @@ pub fn App() -> impl IntoView {
                                 set_rows=Callback::new(move |rs: Vec<KvRow>| headers.set(rs))
                                 key_placeholder="Header"
                                 value_placeholder="Value"
+                                example_key="Authorization"
+                                example_value="Bearer 2f9c8e4d"
+                                preview_label="В запрос уйдёт:"
+                                preview=Callback::new(move |_: ()| "Authorization: Bearer 2f9c8e4d".to_string())
+                                empty_hint="Клик по строке — добавить"
                             />
                         </Show>
                         <Show when={move || tab.get() == "body" && has_body.get()}>
@@ -1530,6 +1545,11 @@ pub fn App() -> impl IntoView {
                                                         })
                                                         key_placeholder="Header"
                                                         value_placeholder="Value"
+                                                        example_key="Authorization"
+                                                        example_value="Bearer 2f9c8e4d"
+                                                        preview_label="В запрос шага уйдёт:"
+                                                        preview=Callback::new(move |_: ()| "Authorization: Bearer 2f9c8e4d".to_string())
+                                                        empty_hint="Клик по строке — добавить"
                                                     />
                                                     <Show when={move || !is_bodyless(&step_at(&steps, i, |s| s.method.clone()))}>
                                                         <textarea class="body-textarea step-body-textarea"
@@ -1585,6 +1605,11 @@ pub fn App() -> impl IntoView {
                                     set_rows=Callback::new(move |rs: Vec<KvRow>| vars.set(rs))
                                     key_placeholder="baseUrl"
                                     value_placeholder="https://api.example.com"
+                                    example_key="baseUrl"
+                                    example_value="https://api.example.com"
+                                    preview_label="Подстановка:"
+                                    preview=Callback::new(move |_: ()| "{{baseUrl}}/v1/users  →  https://api.example.com/v1/users".to_string())
+                                    empty_hint="Клик по строке — добавить"
                                 />
                             </div>
                         </Show>

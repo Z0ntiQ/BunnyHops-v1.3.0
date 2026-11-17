@@ -176,7 +176,10 @@ pub fn KvEditor(
     #[prop(default = "")] example_key: &'static str,
     #[prop(default = "")] example_value: &'static str,
     #[prop(default = "")] empty_hint: &'static str,
-    #[prop(optional)] url_preview: Option<RwSignal<String>>,
+    /* «фактический результат» примера: метка + текст (URL, заголовок, подстановка).
+       Текст может читать сигналы — обновляется реактивно (17.11.2026). */
+    #[prop(default = "")] preview_label: &'static str,
+    #[prop(optional)] preview: Option<Callback<(), String>>,
 ) -> impl IntoView {
     let bulk_open = create_rw_signal(false);
     let bulk_text = create_rw_signal(String::new());
@@ -282,7 +285,8 @@ pub fn KvEditor(
                     example_key=example_key
                     example_value=example_value
                     empty_hint=empty_hint
-                    url_preview=url_preview
+                    preview_label=preview_label
+                    preview=preview
                 />
             </Show>
             <For
@@ -387,7 +391,9 @@ fn KvEmptyState(
     example_key: &'static str,
     example_value: &'static str,
     #[prop(default = "")] empty_hint: &'static str,
-    url_preview: Option<RwSignal<String>>,
+    #[prop(default = "")] preview_label: &'static str,
+    /* пробрасывается как есть; обязателен — у внутреннего компонента всегда Some/None явно */
+    preview: Option<Callback<(), String>>,
 ) -> impl IntoView {
     let add_row = move |_: leptos::ev::MouseEvent| {
         let mut rs = get_rows.run(());
@@ -404,18 +410,11 @@ fn KvEmptyState(
                 <span class="kv-empty-cell">{move || ph_key.get()}</span>
                 <span class="kv-empty-cell">{move || ph_val.get()}</span>
             </span>
-            <Show when={move || url_preview.is_some()}>
+            <Show when={move || preview.is_some()}>
                 <span class="kv-empty-url">
-                    <span class="kv-empty-url-label">{"URL с этим параметром:"}</span>
+                    <span class="kv-empty-url-label">{preview_label}</span>
                     <span class="kv-empty-url-val">{move || {
-                        let base = url_preview.map(|s| s.get()).unwrap_or_default();
-                        let base = if base.trim().is_empty() {
-                            "https://example.com/api/data".to_string()
-                        } else {
-                            base
-                        };
-                        let sep = if base.contains('?') { '&' } else { '?' };
-                        format!("{base}{sep}{example_key}={example_value}")
+                        preview.map(|cb| cb.run(())).unwrap_or_default()
                     }}</span>
                 </span>
             </Show>
