@@ -29,7 +29,7 @@ impl Cdp {
         self.id += 1;
         let msg = json!({ "id": self.id, "method": method, "params": params });
         self.ws
-            .send(Message::Text(msg.to_string().into()))
+            .send(Message::Text(msg.to_string()))
             .await
             .map_err(|e| format!("ws send: {e}"))?;
         loop {
@@ -232,7 +232,7 @@ pub async fn screenshot_handler(Query(q): Query<HashMap<String, String>>) -> Res
             .unwrap_or_default();
         let restore = geo.get("activeTab").and_then(Value::as_str).map(String::from);
 
-        let click_tab = |cdp: &mut Cdp, name: &str| -> Option<(f64, f64)> {
+        let click_tab = |_cdp: &mut Cdp, name: &str| -> Option<(f64, f64)> {
             find_tab(&tabs, name).map(|t| {
                 (
                     t.get("cx").and_then(Value::as_f64).unwrap(),
@@ -273,7 +273,7 @@ pub async fn screenshot_handler(Query(q): Query<HashMap<String, String>>) -> Res
             }
         }
         shots.push(cdp.shot(&right).await?);
-        Ok::<Vec<u8>, String>(stitch(&shots)?)
+        stitch(&shots)
     };
     match tokio::time::timeout(std::time::Duration::from_secs(25), run).await {
         Ok(Ok(png)) => (

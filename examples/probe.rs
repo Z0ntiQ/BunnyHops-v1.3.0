@@ -1,6 +1,5 @@
 // Разделяем TCP / DNS / TLS / HTTP для диагностики исходящих из Rust.
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() {

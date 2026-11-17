@@ -190,7 +190,7 @@ async fn proxy_handler(
         .query()
         .and_then(|q| url_query_param(q, "url"));
 
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .header("Cache-Control", "no-store")
         .header("X-Accel-Buffering", "no");
 

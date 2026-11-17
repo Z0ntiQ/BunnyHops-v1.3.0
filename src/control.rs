@@ -119,6 +119,8 @@ fn err(status: StatusCode, message: &str) -> Response {
     json_response(status, &json!({"ok": false, "error": message}))
 }
 
+// Response в axum заведомо крупный (внутри Body), это штатная цена ошибки в обработчике.
+#[allow(clippy::result_large_err)]
 async fn read_json_body(req: Request) -> Result<Value, Response> {
     let bytes = to_bytes(req.into_body(), MAX_BODY)
         .await
@@ -361,7 +363,7 @@ async fn request_post_handler(State(state): State<AppState>, req: Request) -> Re
         for (k, v) in headers {
             if let (Ok(name), Ok(value)) = (
                 axum::http::HeaderName::from_bytes(k.as_bytes()),
-                axum::http::HeaderValue::from_str(&v.to_string().trim_matches('"').to_string()),
+                axum::http::HeaderValue::from_str(v.to_string().trim_matches('"')),
             ) {
                 map.insert(name, value);
             }

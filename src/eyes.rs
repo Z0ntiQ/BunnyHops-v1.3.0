@@ -22,7 +22,7 @@ use std::collections::HashMap;
 const MAX_W: u32 = 2060;
 
 pub async fn eyes_handler(Query(q): Query<HashMap<String, String>>) -> Response {
-    let full = q.get("full").is_some();
+    let full = q.contains_key("full");
     let frame = match capture_own_window(full) {
         Ok(f) => f,
         Err(e) => {
@@ -57,7 +57,7 @@ pub async fn eyes_handler(Query(q): Query<HashMap<String, String>>) -> Response 
         }
     };
 
-    if q.get("json").is_some() {
+    if q.contains_key("json") {
         return (
             StatusCode::OK,
             Json(json!({
@@ -89,7 +89,7 @@ pub struct Frame {
 fn encode_png(rgba: &image::RgbaImage) -> Result<Vec<u8>, String> {
     use image::ImageEncoder as _;
     let mut buf = std::io::Cursor::new(Vec::new());
-    let mut enc = image::codecs::png::PngEncoder::new(&mut buf);
+    let enc = image::codecs::png::PngEncoder::new(&mut buf);
     enc.write_image(
         rgba.as_raw(),
         rgba.width(),
@@ -119,7 +119,7 @@ pub fn capture_own_window(full: bool) -> Result<Frame, String> {
 
 #[cfg(target_os = "macos")]
 fn capture_own_window_impl(full: bool) -> Result<Frame, String> {
-    use core_foundation::base::{CFType, TCFType, TCFTypeRef};
+    use core_foundation::base::{CFType, TCFType};
     use core_foundation::dictionary::CFDictionary;
     use core_foundation::number::CFNumber;
     use core_foundation::string::CFString;
