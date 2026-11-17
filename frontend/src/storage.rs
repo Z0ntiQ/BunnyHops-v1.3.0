@@ -8,6 +8,7 @@ pub const LS_STEPS: &str = "hoplite.steps";
 pub const LS_VARS: &str = "hoplite.vars";
 pub const LS_SCALE_IDX: &str = "hoplite.scaleIdx";
 pub const LS_LOG_H: &str = "hoplite.logH";
+pub const LS_TRF_H: &str = "hoplite.trfH";
 pub const LS_SAVED: &str = "hoplite.saved";
 pub const LS_GROUPS: &str = "hoplite.groups";
 
@@ -27,7 +28,8 @@ pub fn tab_bottom_gap() -> Option<i32> {
     let win = web_sys::window()?;
     let doc = win.document()?;
     let inner_h = win.inner_height().ok()?.as_f64()? as i32;
-    let el = doc.query_selector(".tabs").ok().flatten()?;
+    // 17.11.2026: ориентир — низ поля URL (раньше был .tabs, его больше нет).
+    let el = doc.query_selector(".url-input").ok().flatten()?;
     let rect = el.get_bounding_client_rect();
     Some((inner_h - 30 - rect.bottom() as i32).max(60))
 }

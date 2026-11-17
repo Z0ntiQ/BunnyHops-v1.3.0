@@ -11,7 +11,7 @@
   --pill: #ffffff;
   --pill-text: #000000;
   --red: #f97066;
-  --orange: #f8a04b;
+  --orange: #ff6a00; /* Walkman orange: единый цвет всех выделений */
   --blue: #4296ec;
   /* design tokens: scales per UI guideline */
   --radius-badge: 2px; --radius-tag: 4px; --radius-control: 6px; --radius-container: 10px; --radius-pill: 999px;
@@ -432,7 +432,7 @@ button.method-select {
 
 .vp-unknown {
   color: var(--orange);
-  background: rgba(248, 160, 75, 0.12);
+  background: rgba(255, 106, 0, 0.12);
   border-radius: var(--radius-tag);
 }
 
@@ -658,7 +658,7 @@ button.method-select {
 }
 
 mark.match {
-  background: rgba(248, 160, 75, 0.35);
+  background: rgba(255, 106, 0, 0.35);
   color: inherit;
   border-radius: var(--radius-badge);
 }
@@ -1090,7 +1090,7 @@ mark.match.current {
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-tag);
   background: var(--bg-input);
-  color: var(--accent);
+  color: var(--text);
   font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
   font-size: var(--fs-caption);
   word-break: break-all;
@@ -1255,7 +1255,7 @@ input[type="checkbox"]:checked::after, .kv-check:checked::after, .px-check:check
 
 .s-2xx { background: var(--accent-dim); color: var(--accent); }
 .s-3xx { background: rgba(66, 150, 236, 0.15); color: var(--blue); }
-.s-4xx { background: rgba(248, 160, 75, 0.15); color: var(--orange); }
+.s-4xx { background: rgba(255, 106, 0, 0.15); color: var(--orange); }
 .s-5xx { background: rgba(249, 112, 102, 0.15); color: var(--red); }
 .s-999 { background: rgba(249, 112, 102, 0.15); color: var(--red); }
 
@@ -1827,24 +1827,28 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 .actlog-line { white-space: pre; }
 
 /* ===== Mock (BunnyProx) — px-* классы ===== */
-.px-layout { display: grid; grid-template-columns: 220px 1fr 300px; height: 100%; }
+.px-layout { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
 .px-side { background: var(--bg-panel); padding: var(--space-4); }
 .px-side .px-item { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: var(--control-h); margin: var(--space-1) 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg-raised); font-size: var(--fs-label); color: var(--text); cursor: pointer; box-sizing: border-box; }
 .px-side .px-item:hover { background: var(--bg); border-color: var(--accent); }
 .px-rule-row { display: flex; align-items: center; gap: var(--space-3); }
 .px-rule-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.px-del { flex: none; visibility: hidden; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--fs-label); line-height: 1; padding: var(--space-1) var(--space-3); border-radius: var(--radius-tag); font-family: inherit; }
+.px-del { flex: none; margin-left: auto; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; visibility: hidden; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--fs-caption); line-height: 1; border-radius: var(--radius-tag); font-family: inherit; }
 .px-item:hover .px-del { visibility: visible; }
 .px-del:hover { color: var(--red); background: rgba(249, 112, 102, .12); }
-.px-del-top { margin: var(--space-1) 0 var(--space-3); color: var(--red); border-color: rgba(249, 112, 102, .4); }
 .px-side .px-item.active { background: var(--accent-dim); color: var(--accent); }
-.px-side .px-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: var(--space-3); flex-shrink: 0; }
+.px-side .px-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .px-side .px-dot.on { background: var(--accent); }
-.px-side .px-h { color: var(--text-dim); font-size: var(--fs-caption); margin-bottom: var(--space-1); }
-.px-side .px-h-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-1); }
-.px-side .px-h-row .px-h { margin-bottom: 0; white-space: nowrap; }
+.px-h { color: var(--text-dim); font-size: var(--fs-caption); margin-bottom: var(--space-1); }
+.px-h-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-1); }
+.px-h-row .px-h { margin-bottom: 0; white-space: nowrap; }
+/* Миниатюрная квадратная кнопка действия у заголовка: размер как у крестика вкладки. */
+.px-mini { flex: none; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--text-dim); cursor: pointer; }
+.px-mini:hover { color: var(--accent); border-color: var(--accent); }
+/* Имя в строке списка: тянется, ✵ прижат вправо. */
+.px-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .px-main { padding: var(--space-4); overflow-y: auto; }
-.px-monitor { background: var(--bg-raised); padding: var(--space-4); }
+.px-monitor { display: flex; flex-direction: column; min-height: 0; box-sizing: border-box; background: var(--bg-raised); padding: var(--space-4); }
 .px-btn { height: var(--control-h); padding: 0 var(--space-3); box-sizing: border-box; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: var(--radius-control); cursor: pointer; font-family: inherit; font-size: var(--fs-label); }
 .px-btn.primary { background: var(--accent); color: var(--bg); }
 .px-btn:hover { opacity: 0.8; }
@@ -1859,12 +1863,15 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 .px-chip { display: inline-block; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: var(--radius-control); font-size: var(--fs-label); margin: var(--space-1); cursor: pointer; }
 .px-chip.active { background: var(--accent); color: var(--bg); }
 .px-json { width: 100%; padding: var(--space-2); border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: monospace; font-size: var(--fs-label); resize: vertical; }
-.px-table { width: 100%; border-collapse: collapse; }
-.px-table th, .px-table td { padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--border); }
-.px-table th { color: var(--text-dim); font-size: var(--fs-caption); }
-.px-row { }
-.px-row:hover { background: var(--bg-raised); }
-.px-status { padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); font-size: var(--fs-label); }
+/* Лог трафика: формат строк как журнал запросов (моноширинный, новые сверху). */
+.px-log { flex: 1; min-height: 0; overflow-y: auto; margin-top: var(--space-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-caption); line-height: 15px; }
+.px-log-line { display: flex; align-items: baseline; gap: var(--space-2); white-space: nowrap; padding: 1px var(--space-1); }
+.px-log-line:hover { background: var(--bg); }
+.px-log-time { flex: none; color: var(--text-dim); }
+.px-log-method { flex: none; width: 44px; color: var(--text-dim); }
+.px-log-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.px-log-ms { flex: none; color: var(--text-dim); }
+.px-status { flex: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); font-size: var(--fs-label); }
 .px-status.ok { color: var(--accent); }
 .px-status.err { color: var(--red); }
 .px-empty { padding: var(--space-5); text-align: center; color: var(--text-dim); }
@@ -1879,4 +1886,10 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 button:active:not(:disabled), .px-item:active, .method-item:active { filter: brightness(0.82); }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .px-item:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* выделение {{переменной}} — Walkman orange (правило: все выделения этим цветом) */
+.kv-token {
+  color: var(--orange);
+  font-weight: 700;
 }

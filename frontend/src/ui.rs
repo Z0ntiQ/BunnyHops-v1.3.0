@@ -124,9 +124,11 @@ fn log_h_max() -> i32 {
         .ok()
         .and_then(|v| v.as_f64())
         .unwrap_or(900.0) as i32;
+    // Верхняя граница журнала — низ поля URL: панель тянется вплоть до инпута.
+    // 17.11.2026: измеряли несуществующий .tabs -> потолок 180px (дефект).
     let bottom = win
         .document()
-        .and_then(|d| d.query_selector(".tabs").ok().flatten())
+        .and_then(|d| d.query_selector(".url-input").ok().flatten())
         .map(|e| e.get_bounding_client_rect().bottom() as i32)
         .unwrap_or(inner - 210);
     (inner - 30 - bottom).max(60)
@@ -382,6 +384,27 @@ pub fn KvEditor(
     }
 }
 
+/// Разбивает текст превью на сегменты: {{токены}} и обычный текст.
+fn split_tokens(s: &str) -> Vec<(bool, String)> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("{{") {
+        if let Some(j) = rest[i..].find("}}") {
+            if i > 0 {
+                out.push((false, rest[..i].to_string()));
+            }
+            out.push((true, rest[i..i + j + 2].to_string()));
+            rest = &rest[i + j + 2..];
+            continue;
+        }
+        break;
+    }
+    if !rest.is_empty() {
+        out.push((false, rest.to_string()));
+    }
+    out
+}
+
 /// Плашка-пример пустого KvEditor: создаётся вместе с Show — плейсхолдеры печатаются
 /// ровно один раз на появление, со скоростью плейсхолдера поля URL (17.11.2026).
 #[component]
@@ -414,7 +437,14 @@ fn KvEmptyState(
                 <span class="kv-empty-url">
                     <span class="kv-empty-url-label">{preview_label}</span>
                     <span class="kv-empty-url-val">{move || {
-                        preview.map(|cb| cb.run(())).unwrap_or_default()
+                        let s = preview.map(|cb| cb.run(())).unwrap_or_default();
+                        split_tokens(&s)
+                            .into_iter()
+                            .map(|(is_token, txt)| {
+                                let cls = if is_token { "kv-token" } else { "" };
+                                view! { <span class=cls>{txt}</span> }
+                            })
+                            .collect::<Vec<_>>()
                     }}</span>
                 </span>
             </Show>

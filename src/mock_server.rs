@@ -142,7 +142,9 @@ struct TrafficEntry {
 
 #[derive(Deserialize)]
 struct NameQuery {
-    name: String,
+    // имени нет — отдаём трафик всех профилей (глобальная панель «Трафик»)
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -419,7 +421,11 @@ async fn profiles_handler() -> Json<Value> {
 }
 
 async fn profile_get_handler(Query(q): Query<NameQuery>) -> Response {
-    match load_profile(&q.name) {
+    // здесь имя обязательно: профиль без имени не загружается
+    let Some(name) = q.name else {
+        return json_error("name required", StatusCode::BAD_REQUEST);
+    };
+    match load_profile(&name) {
         Ok(p) => Json(serde_json::to_value(p).unwrap()).into_response(),
         Err(_) => json_error("not found", StatusCode::NOT_FOUND),
     }
@@ -509,7 +515,33 @@ async fn status_handler() -> Json<Value> {
 }
 
 async fn traffic_handler(Query(q): Query<NameQuery>) -> Json<Value> {
-    let traffic = get_traffic(&q.name);
+    let traffic: Vec<Value> = match q.name {
+        Some(name) => get_traffic(&name)
+            .into_iter()
+            .filter_map(|t| serde_json::to_value(t).ok())
+            .collect(),
+        None => {
+            // все профили, старые первыми; каждая запись с полем profile
+            let mut all: Vec<Value> = Vec::new();
+            {
+                let store = traffic_store().lock().unwrap();
+                for (prof, deque) in store.iter() {
+                    for t in deque.iter() {
+                        if let Value::Object(mut o) = serde_json::to_value(t).unwrap_or(Value::Null) {
+                            o.insert("profile".into(), Value::String(prof.clone()));
+                            all.push(Value::Object(o));
+                        }
+                    }
+                }
+            }
+            all.sort_by(|a, b| {
+                a.get("ts").and_then(|x| x.as_f64()).unwrap_or(0.0)
+                    .partial_cmp(&b.get("ts").and_then(|x| x.as_f64()).unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            all
+        }
+    };
     Json(serde_json::json!({ "traffic": traffic }))
 }
 

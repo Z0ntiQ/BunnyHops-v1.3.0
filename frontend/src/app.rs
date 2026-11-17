@@ -122,29 +122,36 @@ pub fn App() -> impl IntoView {
             post_log(&payload).await;
         });
     };
-    // панель журнала: серверный журнал — единый источник правды:
-    // обновление при открытии и каждые 4 с, пока панель открыта.
-    let _ = Effect::watch(
-        move || log_open.get(),
-        move |open, _, _| {
-            if !*open {
-                return;
-            }
-            spawn_local(async move {
-                loop {
-                    let lines = fetch_action_log().await;
-                    if !lines.is_empty() {
-                        act_log.set(lines);
-                    }
-                    sleep_ms_local(4000).await;
-                    if !log_open.get_untracked() {
-                        break;
-                    }
+    // панель журнала: серверный журнал — единый источник правды.
+    // опрос идёт ВСЕГДА: журнал показывает все действия, даже когда панель закрыта.
+    let _ = Effect::new(move |_| {
+        spawn_local(async move {
+            loop {
+                let lines = fetch_action_log().await;
+                if !lines.is_empty() {
+                    act_log.set(lines);
                 }
-            });
-        },
-        false,
+                sleep_ms_local(4000).await;
+            }
+        });
+    });
+    // панель «Трафик»: все запросы mock-движка по всем профилям; опрос всегда.
+    let trf_log = create_rw_signal(Vec::<String>::new());
+    let trf_open = create_rw_signal(false);
+    let trf_h = create_rw_signal(
+        ls_get(LS_TRF_H)
+            .and_then(|v| v.parse::<i32>().ok())
+            .unwrap_or(150),
     );
+    let _ = Effect::new(move |_| {
+        spawn_local(async move {
+            loop {
+                let lines = fetch_traffic_log().await;
+                trf_log.set(lines);
+                sleep_ms_local(2000).await;
+            }
+        });
+    });
     let groups = create_rw_signal(load_groups());
     let group_modal = create_rw_signal(false);
     let group_name = create_rw_signal(String::new());
@@ -1597,9 +1604,6 @@ pub fn App() -> impl IntoView {
                         </Show>
                         <Show when={move || tab.get() == "vars"}>
                             <div>
-                                <div class="kv-empty" style="margin-bottom:8px">
-                                    "Переменные подставляются в URL, заголовки и тело через "<code>"{{name}}"</code>
-                                </div>
                                 <KvEditor
                                     get_rows=Callback::new(move |_: ()| vars.get())
                                     set_rows=Callback::new(move |rs: Vec<KvRow>| vars.set(rs))
@@ -1607,9 +1611,8 @@ pub fn App() -> impl IntoView {
                                     value_placeholder="https://api.example.com"
                                     example_key="baseUrl"
                                     example_value="https://api.example.com"
-                                    preview_label="Подстановка:"
                                     preview=Callback::new(move |_: ()| "{{baseUrl}}/v1/users  →  https://api.example.com/v1/users".to_string())
-                                    empty_hint="Клик по строке — добавить"
+                                    empty_hint="Использовать в URL, заголовках и теле запроса"
                                 />
                             </div>
                         </Show>
@@ -1976,11 +1979,23 @@ pub fn App() -> impl IntoView {
                 on:click=move |_| {
                     if !log_open.get_untracked() {
                         log_h.set(60);
+                        trf_open.set(false);
                     }
                     log_open.update(|o| *o = !*o);
                 }>
                 "Logs"
                 <span class="actlog-count">{move || act_log.get().len()}</span>
+            </button>
+            <button class="actlog-toggle"
+                on:click=move |_| {
+                    if !trf_open.get_untracked() {
+                        trf_h.set(60);
+                        log_open.set(false);
+                    }
+                    trf_open.update(|o| *o = !*o);
+                }>
+                "Трафик"
+                <span class="actlog-count">{move || trf_log.get().len()}</span>
             </button>
             <Show when=move || log_open.get()>
                 <div class="actlog" style=move || {
@@ -1995,6 +2010,26 @@ pub fn App() -> impl IntoView {
                     <div class="actlog-body">
                         {move || {
                             let v: Vec<String> = act_log.get().into_iter().rev().take(100).collect();
+                            v.into_iter()
+                                .map(|line| view! { <div class="actlog-line">{line}</div> })
+                                .collect::<Vec<_>>()
+                        }}
+                    </div>
+                </div>
+            </Show>
+            <Show when=move || trf_open.get()>
+                <div class="actlog" style=move || {
+                    let cap = tab_bottom_gap().unwrap_or(i32::MAX);
+                    format!("height:{}px", trf_h.get().min(cap))
+                }>
+                    <div class="actlog-resize"
+                        title="Потянуть вверх/вниз — высота панели"
+                        on:pointerdown=move |ev: web_sys::PointerEvent| {
+                            crate::ui::start_log_drag(&ev, trf_h);
+                        }></div>
+                    <div class="actlog-body">
+                        {move || {
+                            let v: Vec<String> = trf_log.get().into_iter().rev().take(200).collect();
                             v.into_iter()
                                 .map(|line| view! { <div class="actlog-line">{line}</div> })
                                 .collect::<Vec<_>>()

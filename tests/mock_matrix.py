@@ -172,7 +172,8 @@ def T5_no_rule():
         err = json.loads(b.decode()).get("error")
     except Exception:
         pass
-    check("T5 no-rule 502", st == 502 and isinstance(err, str) and len(err) > 0, f"status={st} body={b[:120]!r}")
+    # поведение закреплено e2e 16.11.2026: нет правила и нет upstream → 404 no matching rule (не 502)
+    check("T5 no-rule 404", st == 404 and isinstance(err, str) and len(err) > 0, f"status={st} body={b[:120]!r}")
 
 def T6_passthrough():
     st, hdr, b, val = api_json("GET", f"/api/mock/profile?name={PROFILE_NAME}")
@@ -204,6 +205,18 @@ def T7_traffic():
                 break
     check("T7 traffic contains", ok and found, f"status={st} count={len(val.get('traffic', [])) if isinstance(val, dict) else '?'}")
 
+def T7b_traffic_all():
+    # глобальная панель «Трафик»: без name — трафик всех профилей, записи с полем profile
+    st, hdr, b, val = api_json("GET", "/api/mock/traffic")
+    ok = st == 200 and isinstance(val, dict) and isinstance(val.get("traffic"), list)
+    found = False
+    if ok:
+        for item in val["traffic"]:
+            if item.get("profile") == PROFILE_NAME and item.get("path") == "/api/test/x":
+                found = True
+                break
+    check("T7b traffic all-profiles", ok and found, f"status={st} count={len(val.get('traffic', [])) if isinstance(val, dict) else '?'}")
+
 def T8_preview():
     st, hdr, b, val = api_json("POST", "/api/mock/preview", {"json": "{{int:5:5}}", "randomize": True})
     ok = st == 200 and isinstance(val, dict) and val.get("text") == "5"
@@ -218,7 +231,7 @@ def main():
     srv = EchoServer(("127.0.0.1", ECHO_PORT), Echo)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     for fn in (T1_crud, T2_start_stop, T3_randomize, T4_static, T5_no_rule,
-               T6_passthrough, T7_traffic, T8_preview):
+               T6_passthrough, T7_traffic, T7b_traffic_all, T8_preview):
         try:
             fn()
         except Exception as e:

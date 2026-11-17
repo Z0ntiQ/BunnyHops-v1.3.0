@@ -31,6 +31,54 @@ pub fn render_log_item(it: &LogItem) -> String {
         .to_string()
 }
 
+/// Трафик mock-движка по всем профилям, старые первыми (панель показывает реверсом).
+#[derive(serde::Deserialize)]
+struct TEntry {
+    ts: f64,
+    #[serde(default)]
+    profile: String,
+    method: String,
+    path: String,
+    status: u16,
+    ms: u64,
+}
+
+pub async fn fetch_traffic_log() -> Vec<String> {
+    let win = match web_sys::window() {
+        Some(w) => w,
+        None => return Vec::new(),
+    };
+    let promise = win.fetch_with_str("/api/mock/traffic");
+    let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
+        return Vec::new();
+    };
+    let Ok(resp) = val.dyn_into::<web_sys::Response>() else {
+        return Vec::new();
+    };
+    let Ok(text_promise) = resp.text() else {
+        return Vec::new();
+    };
+    let Ok(txt) = wasm_bindgen_futures::JsFuture::from(text_promise).await else {
+        return Vec::new();
+    };
+    #[derive(serde::Deserialize)]
+    struct TResp {
+        traffic: Vec<TEntry>,
+    }
+    let Ok(doc) = serde_json::from_str::<TResp>(&txt.as_string().unwrap_or_default()) else {
+        return Vec::new();
+    };
+    doc.traffic
+        .iter()
+        .map(|t| {
+            format!(
+                "{} [{}] {} {} -> {} {}ms",
+                ts_at(t.ts as u64), t.profile, t.method, t.path, t.status, t.ms
+            )
+        })
+        .collect()
+}
+
 /// Серверный журнал действий, старые первыми (панель показывает реверсом).
 pub async fn fetch_action_log() -> Vec<String> {
     let win = match web_sys::window() {

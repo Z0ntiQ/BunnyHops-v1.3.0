@@ -9,6 +9,19 @@ use serde_json::{Value, json};
 
 use crate::ui::{input_value, input_checked, select_value};
 
+/// Мини-плюс для кнопок добавления: SVG в стиле системных иконок (stroke currentColor).
+#[component]
+fn IconPlus() -> impl IntoView {
+    view! {
+        <svg aria-hidden="true" width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path
+                d="M8 3.25v9.5M3.25 8h9.5"
+                stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+            />
+        </svg>
+    }
+}
+
 /// Количество правил в записи профиля: API шлёт число, полный объект — массив.
 fn rules_count_of(p: &Value) -> usize {
     match p.get("rules") {
@@ -58,11 +71,9 @@ pub fn ProxyView() -> impl IntoView {
     let selected_rule_idx = create_rw_signal(Option::<usize>::None);
     let variants = create_rw_signal(Vec::<Value>::new());
     let selected_variant_idx = create_rw_signal(Option::<usize>::None);
-    let traffic = create_rw_signal(Vec::<Value>::new());
     let status_msg = create_rw_signal(String::new());
     let status_err = create_rw_signal(false);
     let preview_result = create_rw_signal(String::new());
-    let polling_active = create_rw_signal(false);
     let new_profile_open = create_rw_signal(false);
     let new_profile_name = create_rw_signal(String::new());
 
@@ -156,7 +167,6 @@ pub fn ProxyView() -> impl IntoView {
                         status_msg.set(format!("Запущен на порту {}", port));
                         status_err.set(false);
                         load_profiles();
-                        polling_active.set(true);
                     }
                     Err(e) => {
                         status_msg.set(e);
@@ -176,7 +186,6 @@ pub fn ProxyView() -> impl IntoView {
                         status_msg.set("Остановлен".into());
                         status_err.set(false);
                         load_profiles();
-                        polling_active.set(false);
                     }
                     Err(e) => {
                         status_msg.set(e);
@@ -411,36 +420,6 @@ pub fn ProxyView() -> impl IntoView {
         }
     };
 
-    let poll_traffic: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
-    {
-        let pt_fill = poll_traffic.clone();
-        let pt_self = poll_traffic.clone();
-        *pt_fill.borrow_mut() = Some(Box::new(move || {
-            if let Some(name) = selected_profile.get() {
-                if polling_active.get() {
-                    spawn_local(async move {
-                        if let Ok(v) = fetch_json_get(&format!("/api/mock/traffic?name={}", name)).await {
-                            if let Some(arr) = v.get("traffic").and_then(|x| x.as_array()) {
-                                traffic.set(arr.clone());
-                            }
-                        }
-                    });
-                }
-            }
-            let pt_next = pt_self.clone();
-            let cb = Closure::wrap(Box::new(move || {
-                if let Some(f) = pt_next.borrow().as_ref() { f(); }
-            }) as Box<dyn FnMut()>);
-            if let Some(w) = window() {
-                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                    cb.as_ref().unchecked_ref(),
-                    2000,
-                );
-            }
-            cb.forget();
-        }));
-    }
-
     let _on_profile_change = move |ev: web_sys::Event| {
         let val = input_value(ev);
         let mut pd = profile_data.get();
@@ -537,22 +516,17 @@ pub fn ProxyView() -> impl IntoView {
         load_profiles();
     });
 
-    Effect::new(move |_| {
-        if polling_active.get() {
-            if let Some(f) = poll_traffic.borrow().as_ref() { f(); }
-        }
-    });
-
     view! {
         <div class="px-layout">
             <div class="px-side">
                 <div class="px-h-row">
                     <div class="px-h">Профили</div>
-                    <button class="px-btn" on:click=move |_| {
-                        new_profile_name.set(String::new());
-                        new_profile_open.update(|o| *o = !*o);
-                    }>
-                        "Создать профиль"
+                    <button class="px-mini" title="Создать профиль" aria-label="Создать профиль"
+                        on:click=move |_| {
+                            new_profile_name.set(String::new());
+                            new_profile_open.update(|o| *o = !*o);
+                        }>
+                        <IconPlus />
                     </button>
                 </div>
                 <Show when=move || new_profile_open.get()>
@@ -591,7 +565,7 @@ pub fn ProxyView() -> impl IntoView {
                                 <div class=item_cls
                                     on:click=move |_| load_profile(name_click.clone())>
                                     <span class=dot_cls></span>
-                                    <span>{name}</span>
+                                    <span class="px-name">{name}</span>
                                     <button class="px-del" title="Удалить профиль"
                                         on:click=move |e| {
                                             e.stop_propagation();
@@ -675,7 +649,13 @@ pub fn ProxyView() -> impl IntoView {
                         <div class="px-status err">{move || status_msg.get()}</div>
                     </Show>
 
-                    <div class="px-h">Правила</div>
+                    <div class="px-h-row">
+                        <div class="px-h">Правила</div>
+                        <button class="px-mini" title="Новое правило" aria-label="Новое правило"
+                            on:click=move |_| add_rule()>
+                            <IconPlus />
+                        </button>
+                    </div>
                     <div class="px-rules">
                         <For
                             each=move || rules.get()
@@ -697,12 +677,7 @@ pub fn ProxyView() -> impl IntoView {
                             }
                         />
                     </div>
-                    <button class="px-btn" on:click=move |_| add_rule()>"＋ Правило"</button>
-
                     <Show when=move || selected_rule_idx.get().is_some() fallback=move || { view! { <div class="px-empty">Выберите правило для редактирования</div> } }>
-                        <button class="px-btn danger px-del-top" on:click=move |_| {
-                            if let Some(idx) = selected_rule_idx.get() { delete_rule(idx); }
-                        }>"✕ Удалить правило"</button>
                         <div class="px-field">
                             <label class="px-label">"Label"</label>
                             <input class="px-input" type="text"
@@ -754,7 +729,13 @@ pub fn ProxyView() -> impl IntoView {
                             </label>
                         </div>
 
-                        <div class="px-h">Варианты ответа</div>
+                        <div class="px-h-row">
+                            <div class="px-h">Варианты ответа</div>
+                            <button class="px-mini" title="Новый вариант" aria-label="Новый вариант"
+                                on:click=move |_| add_variant()>
+                                <IconPlus />
+                            </button>
+                        </div>
                         <div class="px-rules">
                             <For
                                 each=move || variants.get()
@@ -773,7 +754,6 @@ pub fn ProxyView() -> impl IntoView {
                                 }
                             />
                         </div>
-                        <button class="px-btn" on:click=move |_| add_variant()>"＋ Вариант"</button>
 
                         <Show when=move || selected_variant_idx.get().is_some() fallback=move || { view! { <div class="px-empty">Выберите вариант для редактирования</div> } }>
                             <div class="px-field">
@@ -840,43 +820,6 @@ pub fn ProxyView() -> impl IntoView {
                             </Show>
                         </Show>
                     </Show>
-                </Show>
-            </div>
-
-            <div class="px-monitor">
-                <div class="px-h">Трафик</div>
-                <Show when=move || polling_active.get() fallback=move || { view! { <div class="px-empty">Запустите профиль для мониторинга</div> } }>
-                    <table class="px-table">
-                        <thead>
-                            <tr>
-                                <th>Method</th>
-                                <th>Path</th>
-                                <th>Status</th>
-                                <th>ms</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <For
-                                each=move || traffic.get()
-                                key=|t| t.get("ts").and_then(|x| x.as_f64()).unwrap_or(0.0).to_string()
-                                children=move |t| {
-                                    let method = t.get("method").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                                    let path = t.get("path").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                                    let status = t.get("status").and_then(|x| x.as_u64()).unwrap_or(0);
-                                    let ms = t.get("ms").and_then(|x| x.as_u64()).unwrap_or(0);
-                                    let status_class = if status < 400 { "ok" } else { "err" };
-                                    view! {
-                                        <tr class="px-row">
-                                            <td>{method}</td>
-                                            <td>{path}</td>
-                                            <td class=status_class>{status}</td>
-                                            <td>{ms}</td>
-                                        </tr>
-                                    }
-                                }
-                            />
-                        </tbody>
-                    </table>
                 </Show>
             </div>
         </div>
