@@ -145,6 +145,7 @@ pub fn KvEditor(
     #[prop(default = "")] example_key: &'static str,
     #[prop(default = "")] example_value: &'static str,
     #[prop(default = "")] empty_hint: &'static str,
+    #[prop(optional)] url_preview: Option<RwSignal<String>>,
 ) -> impl IntoView {
     let bulk_open = create_rw_signal(false);
     let bulk_text = create_rw_signal(String::new());
@@ -250,6 +251,21 @@ pub fn KvEditor(
                         <span class="kv-empty-cell">{example_key}</span>
                         <span class="kv-empty-cell">{example_value}</span>
                     </span>
+                    <Show when={move || url_preview.is_some()}>
+                        <span class="kv-empty-url">
+                            <span class="kv-empty-url-label">{"URL с этим параметром:"}</span>
+                            <span class="kv-empty-url-val">{move || {
+                                let base = url_preview.map(|s| s.get()).unwrap_or_default();
+                                let base = if base.trim().is_empty() {
+                                    "https://example.com/api/data".to_string()
+                                } else {
+                                    base
+                                };
+                                let sep = if base.contains('?') { '&' } else { '?' };
+                                format!("{base}{sep}{example_key}={example_value}")
+                            }}</span>
+                        </span>
+                    </Show>
                     <span class="kv-empty-hint">{empty_hint}</span>
                 </button>
             </Show>

@@ -1397,6 +1397,7 @@ pub fn App() -> impl IntoView {
                                 value_placeholder="Value"
                                 example_key="token"
                                 example_value="2f9c8e4d"
+                                url_preview=url
                                 empty_hint="Пример. Клик по строке добавит параметр; включённые непустые параметры попадут в URL после «?»"
                             />
                         </Show>

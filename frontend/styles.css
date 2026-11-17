@@ -1074,6 +1074,27 @@ mark.match.current {
   font-size: var(--fs-caption);
 }
 
+.kv-empty-url {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kv-empty-url-label {
+  color: var(--text-dim);
+  font-size: var(--fs-caption);
+}
+
+.kv-empty-url-val {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-tag);
+  background: var(--bg-input);
+  color: var(--accent);
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: var(--fs-caption);
+  word-break: break-all;
+}
+
 /* ---------- key/value editor ---------- */
 
 .kv-list {
