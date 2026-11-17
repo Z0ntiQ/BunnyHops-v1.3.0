@@ -134,12 +134,17 @@ fn log_h_max() -> i32 {
 
 /// get_rows/set_rows — произвольное хранилище (сигнал или строка внутри шага),
 /// как rows/onChange в React-версии.
+/// example_*/empty_hint — строка-пример, пока список пуст (URL Params);
+/// без них панель пустая, как раньше.
 #[component]
 pub fn KvEditor(
     get_rows: Callback<(), Vec<KvRow>>,
     set_rows: Callback<Vec<KvRow>>,
     key_placeholder: &'static str,
     value_placeholder: &'static str,
+    #[prop(default = "")] example_key: &'static str,
+    #[prop(default = "")] example_value: &'static str,
+    #[prop(default = "")] empty_hint: &'static str,
 ) -> impl IntoView {
     let bulk_open = create_rw_signal(false);
     let bulk_text = create_rw_signal(String::new());
@@ -165,6 +170,13 @@ pub fn KvEditor(
         }
     };
     let close_bulk = move |_: leptos::ev::MouseEvent| bulk_open.set(false);
+
+    /* клик по строке-примеру добавляет настоящую строку — тот же путь, что «+ Add new» */
+    let add_row = move |_: leptos::ev::MouseEvent| {
+        let mut rs = get_rows.run(());
+        rs.push(KvRow { key: String::new(), value: String::new(), on: true });
+        set_rows.run(rs);
+    };
 
     view! {
         <div class="kv-list" class:bulk-open=move || bulk_open.get()>
@@ -226,18 +238,21 @@ pub fn KvEditor(
                     </Show>
                 </div>
                 <div class="kv-toolbar-right">
-                    <button
-                        class="kv-add"
-                        on:click=move |_| {
-                            let mut rs = get_rows.run(());
-                            rs.push(KvRow { key: String::new(), value: String::new(), on: true });
-                            set_rows.run(rs);
-                        }
-                    >
+                    <button class="kv-add" on:click=add_row>
                         "+ Add new"
                     </button>
                 </div>
             </div>
+            <Show when={move || get_rows.run(()).is_empty() && !example_key.is_empty()}>
+                <button class="kv-empty" on:click=add_row title="Добавить строку">
+                    <span class="kv-empty-row">
+                        <span class="kv-empty-check"/>
+                        <span class="kv-empty-cell">{example_key}</span>
+                        <span class="kv-empty-cell">{example_value}</span>
+                    </span>
+                    <span class="kv-empty-hint">{empty_hint}</span>
+                </button>
+            </Show>
             <For
                 each={move || get_rows.run(()).into_iter().enumerate().collect::<Vec<_>>()}
                 key={|(i, _)| *i}

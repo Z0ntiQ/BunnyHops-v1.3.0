@@ -985,17 +985,18 @@ mark.match.current {
 .tab {
   position: relative;
   z-index: 1;
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-1) var(--space-3);
   border: none;
   background: none;
   color: var(--text-dim);
-  font-size: var(--fs-body);
+  font-size: var(--fs-label);
   font-weight: 600;
   cursor: pointer;
   border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  white-space: nowrap;
   transition: color 0.25s;
 }
 
@@ -1008,7 +1009,7 @@ mark.match.current {
 }
 
 .tab-count {
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
   border-radius: var(--radius-container);
   background: var(--accent-dim);
   color: var(--accent);
@@ -1016,10 +1017,61 @@ mark.match.current {
 }
 
 .tab-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--orange);
+}
+
+/* пустой список: строка-пример по клику добавляет настоящую строку */
+.kv-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-container);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.kv-empty:hover {
+  border-color: var(--accent);
+}
+
+.kv-empty-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.kv-empty-check {
+  width: 16px;
+  height: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-tag);
+  flex-shrink: 0;
+}
+
+.kv-empty-cell {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  opacity: 0.7;
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kv-empty-hint {
+  color: var(--text-dim);
+  font-size: var(--fs-caption);
 }
 
 /* ---------- key/value editor ---------- */

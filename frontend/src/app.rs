@@ -1395,6 +1395,9 @@ pub fn App() -> impl IntoView {
                                 set_rows=Callback::new(move |rs: Vec<KvRow>| on_params_change.run(rs))
                                 key_placeholder="Parameter"
                                 value_placeholder="Value"
+                                example_key="token"
+                                example_value="2f9c8e4d"
+                                empty_hint="Пример. Клик по строке добавит параметр; включённые непустые параметры попадут в URL после «?»"
                             />
                         </Show>
                         <Show when={move || tab.get() == "headers"}>
