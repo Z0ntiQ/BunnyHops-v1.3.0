@@ -132,6 +132,37 @@ fn log_h_max() -> i32 {
     (inner - 30 - bottom).max(60)
 }
 
+/// Тайп-машина плейсхолдеров: ключ, затем значение, с той же скоростью, что живой
+/// плейсхолдер поля URL (90ms/символ). Ровно один проход, без цикла (17.11.2026).
+pub fn type_placeholders_once(
+    key: &'static str,
+    value: &'static str,
+    out_key: RwSignal<String>,
+    out_val: RwSignal<String>,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        for i in 0..=key.chars().count() {
+            out_key.set(key.chars().take(i).collect());
+            sleep_ms(90).await;
+        }
+        for i in 0..=value.chars().count() {
+            out_val.set(value.chars().take(i).collect());
+            sleep_ms(90).await;
+        }
+    });
+}
+
+fn sleep_ms(ms: i32) -> impl std::future::Future<Output = ()> {
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let _ = web_sys::window()
+            .expect("no window")
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+    });
+    async move {
+        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    }
+}
+
 /// get_rows/set_rows — произвольное хранилище (сигнал или строка внутри шага),
 /// как rows/onChange в React-версии.
 /// example_*/empty_hint — строка-пример, пока список пуст (URL Params);
@@ -245,29 +276,14 @@ pub fn KvEditor(
                 </div>
             </div>
             <Show when={move || get_rows.run(()).is_empty() && !example_key.is_empty()}>
-                <button class="kv-empty" on:click=add_row title="Добавить строку">
-                    <span class="kv-empty-row">
-                        <span class="kv-empty-check"/>
-                        <span class="kv-empty-cell">{example_key}</span>
-                        <span class="kv-empty-cell">{example_value}</span>
-                    </span>
-                    <Show when={move || url_preview.is_some()}>
-                        <span class="kv-empty-url">
-                            <span class="kv-empty-url-label">{"URL с этим параметром:"}</span>
-                            <span class="kv-empty-url-val">{move || {
-                                let base = url_preview.map(|s| s.get()).unwrap_or_default();
-                                let base = if base.trim().is_empty() {
-                                    "https://example.com/api/data".to_string()
-                                } else {
-                                    base
-                                };
-                                let sep = if base.contains('?') { '&' } else { '?' };
-                                format!("{base}{sep}{example_key}={example_value}")
-                            }}</span>
-                        </span>
-                    </Show>
-                    <span class="kv-empty-hint">{empty_hint}</span>
-                </button>
+                <KvEmptyState
+                    get_rows=get_rows
+                    set_rows=set_rows
+                    example_key=example_key
+                    example_value=example_value
+                    empty_hint=empty_hint
+                    url_preview=url_preview
+                />
             </Show>
             <For
                 each={move || get_rows.run(()).into_iter().enumerate().collect::<Vec<_>>()}
@@ -276,6 +292,11 @@ pub fn KvEditor(
                     let key_ref = create_node_ref::<leptos::html::Input>();
                     let val_ref = create_node_ref::<leptos::html::Input>();
                     let chk_ref = create_node_ref::<leptos::html::Input>();
+                    /* плейсхолдеры строки печатаются один раз при её появлении,
+                       как в поле URL (17.11.2026); у строк со значением плейсхолдер скрыт */
+                    let ph_key = create_rw_signal(String::new());
+                    let ph_val = create_rw_signal(String::new());
+                    type_placeholders_once(key_placeholder, value_placeholder, ph_key, ph_val);
                     create_effect(move |_| {
                         let rs = get_rows.run(());
                         if let Some(r) = rs.get(i) {
@@ -310,7 +331,7 @@ pub fn KvEditor(
                                 node_ref=key_ref
                                 class="kv-input"
                                 prop:value=row.key
-                                placeholder=key_placeholder
+                                placeholder=move || ph_key.get()
                                 spellcheck="false"
                                 on:input=move |ev| {
                                     let v = input_value(ev);
@@ -325,7 +346,7 @@ pub fn KvEditor(
                                 node_ref=val_ref
                                 class="kv-input"
                                 prop:value=row.value
-                                placeholder=value_placeholder
+                                placeholder=move || ph_val.get()
                                 spellcheck="false"
                                 on:input=move |ev| {
                                     let v = input_value(ev);
@@ -354,6 +375,52 @@ pub fn KvEditor(
                 }}
             />
         </div>
+    }
+}
+
+/// Плашка-пример пустого KvEditor: создаётся вместе с Show — плейсхолдеры печатаются
+/// ровно один раз на появление, со скоростью плейсхолдера поля URL (17.11.2026).
+#[component]
+fn KvEmptyState(
+    get_rows: Callback<(), Vec<KvRow>>,
+    set_rows: Callback<Vec<KvRow>>,
+    example_key: &'static str,
+    example_value: &'static str,
+    #[prop(default = "")] empty_hint: &'static str,
+    url_preview: Option<RwSignal<String>>,
+) -> impl IntoView {
+    let add_row = move |_: leptos::ev::MouseEvent| {
+        let mut rs = get_rows.run(());
+        rs.push(KvRow { key: String::new(), value: String::new(), on: true });
+        set_rows.run(rs);
+    };
+    let ph_key = create_rw_signal(String::new());
+    let ph_val = create_rw_signal(String::new());
+    type_placeholders_once(example_key, example_value, ph_key, ph_val);
+    view! {
+        <button class="kv-empty" on:click=add_row title="Добавить строку">
+            <span class="kv-empty-row">
+                <span class="kv-empty-check"/>
+                <span class="kv-empty-cell">{move || ph_key.get()}</span>
+                <span class="kv-empty-cell">{move || ph_val.get()}</span>
+            </span>
+            <Show when={move || url_preview.is_some()}>
+                <span class="kv-empty-url">
+                    <span class="kv-empty-url-label">{"URL с этим параметром:"}</span>
+                    <span class="kv-empty-url-val">{move || {
+                        let base = url_preview.map(|s| s.get()).unwrap_or_default();
+                        let base = if base.trim().is_empty() {
+                            "https://example.com/api/data".to_string()
+                        } else {
+                            base
+                        };
+                        let sep = if base.contains('?') { '&' } else { '?' };
+                        format!("{base}{sep}{example_key}={example_value}")
+                    }}</span>
+                </span>
+            </Show>
+            <span class="kv-empty-hint">{empty_hint}</span>
+        </button>
     }
 }
 

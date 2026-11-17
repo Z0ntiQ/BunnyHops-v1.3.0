@@ -1061,7 +1061,8 @@ mark.match.current {
   border: 1px dashed var(--border);
   border-radius: var(--radius-control);
   color: var(--text-dim);
-  opacity: 0.7;
+  /* как плейсхолдер поля URL: тот же цвет и прозрачность (17.11.2026) */
+  opacity: 0.45;
   font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
   font-size: var(--fs-label);
   white-space: nowrap;
@@ -1156,6 +1157,9 @@ input[type="checkbox"]:checked::after, .kv-check:checked::after, .px-check:check
 .kv-input:focus {
   border-color: var(--accent);
 }
+
+/* Плейсхолдер строк — как у поля URL: тот же цвет и прозрачность (17.11.2026). */
+.kv-input::placeholder { color: var(--text-dim); opacity: 0.45; }
 
 .kv-remove {
   border: none;
