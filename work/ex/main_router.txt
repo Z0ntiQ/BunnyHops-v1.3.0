@@ -1,0 +1,77 @@
+}
+
+fn open_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    Command::new("open").arg(url).spawn().ok();
+    #[cfg(target_os = "windows")]
+    Command::new("cmd").args(["/C", "start", "", url]).spawn().ok();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    Command::new("xdg-open").arg(url).spawn().ok();
+}
+
+mod screenshot;
+use screenshot::screenshot_handler;
+
+#[tokio::main]
+async fn main() {
+    // dist рядом с бинарником; переопределение — BUNNY_HOPS_DIST (старый HOP_LITE_DIST тоже принимается)
+    let dist = match env::var("BUNNY_HOPS_DIST").or_else(|_| env::var("HOP_LITE_DIST")) {
+        Ok(d) => PathBuf::from(d),
+        Err(_) => {
+            let exe = env::current_exe().unwrap_or_default();
+            exe.parent().map(|p| p.join("dist")).unwrap_or_else(|| PathBuf::from("dist"))
+        }
+    };
+    if !dist.join("index.html").is_file() {
+        eprintln!("Ошибка: не найдена папка dist/ рядом с сервером. Сборка отсутствует.");
+        std::process::exit(1);
+    }
+
+    let start_port: u16 = env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        // Как браузер: висящее соединение не должно держать лоадер вечно.
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap();
+
+    let app = Router::new()
+        .route("/proxy", any(proxy_handler))
+        .route("/screenshot", any(screenshot_handler))
+        .route("/api/automation-rules", get(api_rules_handler))
+        .fallback(move |req: Request| {
+            let root = dist.clone();
+            async move { serve_static_or_spa(&root, req).await }
+        })
+        .with_state(AppState {
+            client,
+            api_log: Arc::new(Mutex::new(Vec::new())),
+        });
+
+    // автоподбор порта, как listen(port+1) в оригинале (до 10 попыток)
+    let mut port = start_port;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(("::", port)).await {
+            Ok(l) => break l,
+            Err(_) if port < 65535 => port += 1,
+            Err(e) => {
+                eprintln!("Не удалось занять порт (последняя ошибка: {e}).");
+                std::process::exit(1);
+            }
+        }
+    };
+
+    let url = format!("http://localhost:{port}");
+    println!("==========================================");
+    println!("  Bunny Hops запущен! (Rust)");
+    println!("  Адрес: {url}");
+    println!("  Закройте это окно, чтобы остановить сервер.");
+    println!("==========================================");
+    if env::var("HOP_NO_BROWSER").is_err() {
+        open_browser(&url);
+    }
+
+    axum::serve(listener, app).await.unwrap();
+}

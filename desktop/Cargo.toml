@@ -1,0 +1,17 @@
+[package]
+name = "bunny-hops-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Bunny Hops: оконная оболочка Tauri v2 поверх того же ядра (lib bunny-hops-server)."
+
+[dependencies]
+bunny-hops-server = { path = ".." }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+strip = true
+lto = true

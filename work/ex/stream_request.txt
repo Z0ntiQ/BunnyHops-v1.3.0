@@ -1,0 +1,56 @@
+
+    let mut h = Vec::new();
+    for (k, v) in headers_obj {
+        if !k.trim().is_empty() {
+            h.push((k.clone(), v.clone()));
+        }
+    }
+    let proxy_url = format!("/proxy?url={}", crate::logic::js_encode_uri_component(target));
+    let init = RequestInit::new();
+    init.set_method(method);
+    let hobj = js_sys::Object::new();
+    let headers_json = serde_json::to_string(
+        &h.iter().map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone()))).collect::<serde_json::Map<_, _>>(),
+    )
+    .unwrap();
+    // порядок ключей в JSON сохраняем вручную: serde_json::Map сортирует только с feature "preserve_order";
+    // для контракта прокси порядок не значим.
+    js_sys::Reflect::set(&hobj, &JsValue::from_str("x-proxy-headers"), &JsValue::from_str(&headers_json))
+        .unwrap();
+    // запросы из интерфейса не попадают в лог внешнего API
+    let _ = js_sys::Reflect::set(&hobj, &JsValue::from_str("x-hop-ui"), &JsValue::from_str("1"));
+    init.set_headers(&JsValue::from(hobj));
+    if !body_text.trim().is_empty() && !matches!(method, "GET" | "HEAD") {
+        init.set_body(&JsValue::from_str(body_text));
+    }
+    init.set_signal(Some(signal));
+
+    let req = Request::new_with_str_and_init(&proxy_url, &init)?;
+    let resp_val = JsFuture::from(win.fetch_with_request(&req)).await?;
+    let resp: Response = resp_val.dyn_into()?;
+
+    let proxy_err = resp.headers().get("x-proxy-error").unwrap_or(None);
+    if let Some(_pe) = proxy_err {
+        let text = JsFuture::from(resp.text()?).await?.as_string().unwrap_or_default();
+        return Ok(StreamOutcome {
+            network_error: true,
+            status: resp.status() as u16,
+            time_ms: 0.0,
+            bytes: 0,
+            text: if text.is_empty() { "Не удалось подключиться".to_string() } else { text },
+            image_blob_url: None,
+        });
+    }
+
+    let mut headers: Vec<(String, String)> = Vec::new();
+    // web_sys HeadersIterator::next() в этой версии возвращает Err с вложенным
+    // значением — берём записи через Array::from по Symbol.iterator.
+    let entries = js_sys::Array::from(&resp.headers().entries());
+    for item in entries.iter() {
+        if let Ok(arr) = item.dyn_into::<js_sys::Array>() {
+            let k = arr.get(0).as_string().unwrap_or_default();
+            let v = arr.get(1).as_string().unwrap_or_default();
+            headers.push((k, v));
+        }
+    }
+    let content_type = headers

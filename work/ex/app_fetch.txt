@@ -1,0 +1,51 @@
+fn load_vars() -> Vec<KvRow> {
+    ls_get(LS_VARS)
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn load_saved() -> Vec<SavedReq> {
+    ls_get(LS_SAVED)
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn load_groups() -> Vec<SavedGroup> {
+    ls_get(LS_GROUPS)
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+async fn fetch_api_calls() -> Vec<ApiCall> {
+    let win = match web_sys::window() {
+        Some(w) => w,
+        None => return Vec::new(),
+    };
+    let promise = win.fetch_with_str("/api/automation-rules");
+    let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
+        return Vec::new();
+    };
+    let Ok(resp) = val.dyn_into::<web_sys::Response>() else {
+        return Vec::new();
+    };
+    let Ok(text_promise) = resp.text() else {
+        return Vec::new();
+    };
+    let Ok(txt) = wasm_bindgen_futures::JsFuture::from(text_promise).await else {
+        return Vec::new();
+    };
+    serde_json::from_str(&txt.as_string().unwrap_or_default()).unwrap_or_default()
+}
+
+fn ts_short() -> String {
+    let d = js_sys::Date::new_0();
+    format!("{:02}:{:02}:{:02}", d.get_hours(), d.get_minutes(), d.get_seconds())
+}
+
+fn fmt_ts(ts: u64) -> String {
+    let d = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
+    js_sys::Date::to_time_string(&d).into()
+}
+
+fn load_scale_idx() -> usize {
+    ls_get(LS_SCALE_IDX)

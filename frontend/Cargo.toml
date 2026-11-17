@@ -1,0 +1,32 @@
+[package]
+name = "bunny-hops-ui"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "0.7", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+  "AbortController", "AbortSignal", "Blob", "BlobPropertyBag", "Document",
+  "DomRect", "Element", "HtmlElement", "HtmlInputElement", "HtmlSelectElement",
+  "HtmlTextAreaElement", "Headers", "InputEvent", "KeyboardEvent",
+  "HtmlDocument", "Location", "MediaQueryList", "Navigator", "Performance", "ReadableStream",
+  "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Request",
+  "RequestInit", "RequestMode", "Response", "Storage", "TextDecoder",
+  "TextDecodeOptions", "Url", "Window",
+  "Clipboard", "Crypto", "EventTarget",
+  "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollBehavior",
+] }
+serde = { version = "1", features = ["derive"] }
+console_error_panic_hook = "0.1"
+serde_json = "1"
+regex = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true

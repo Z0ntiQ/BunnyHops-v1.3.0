@@ -1,0 +1,1 @@
+proxy error: reqwest::Error { kind: Request, url: "http://nope.invalid:9/x", source: hyper_util::client::legacy::Error(Connect, ConnectError("dns error", Custom { kind: Uncategorized, error: "failed to lookup address information: nodename nor servname provided, or not known" })) }

@@ -1,0 +1,21 @@
+   Compiling hop-lite-server v0.1.0 (/Users/alexandrcherenkov/.hermes/skills/hop-lite-rust)
+warning: unused import: `Bytes`
+ --> src/main.rs:6:34
+  |
+6 | use axum::body::{to_bytes, Body, Bytes};
+  |                                  ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/main.rs:133:9
+    |
+133 |     let mut builder = Response::builder()
+    |         ----^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `hop-lite-server` (bin "hop-lite-server") generated 2 warnings (run `cargo fix --bin "hop-lite-server" -p hop-lite-server` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 14.53s

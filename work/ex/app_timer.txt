@@ -1,0 +1,41 @@
+    );
+
+    let _ = Effect::watch(
+        move || saved.get().len(),
+        move |_, _, _: Option<()>| {
+            let cf = cloud_full;
+            let cb = Closure::wrap(Box::new(move || {
+                cf.set(cloud_overflow());
+            }) as Box<dyn FnMut()>);
+            if let Some(w) = web_sys::window() {
+                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    cb.as_ref().unchecked_ref(),
+                    80,
+                );
+            }
+            cb.forget();
+        },
+        false,
+    );
+    {
+        let cf = cloud_full;
+        let on_resize = Closure::wrap(Box::new(move || {
+            cf.set(cloud_overflow());
+        }) as Box<dyn FnMut()>);
+        if let Some(w) = web_sys::window() {
+            let _ = w.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
+        }
+        on_resize.forget();
+    }
+
+    /* ---------- copy ---------- */
+    let mark_copied = |copied: RwSignal<bool>| Callback::new(move |_: ()| {
+        copied.set(true);
+        let cb = Closure::wrap(Box::new(move || copied.set(false)) as Box<dyn FnMut()>);
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                1200,
+            );
+        }
+        cb.forget();

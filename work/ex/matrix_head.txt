@@ -1,0 +1,70 @@
+# -*- coding: utf-8 -*-
+"""Full functional API matrix for bunny-hops-server on :3000."""
+import json, gzip, http.server, socketserver, threading, urllib.request, urllib.error, sys, time
+
+ECHO_PORT = 8099
+BASE = "http://localhost:3000"
+results = []
+
+# ---------- local echo server ----------
+class Echo(http.server.BaseHTTPRequestHandler):
+    def _send(self, code, payload=b"", ctype="application/json", gz=False):
+        if gz:
+            payload = gzip.compress(payload)
+            self.send_response(code)
+            self.send_header("Content-Encoding", "gzip")
+        else:
+            self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def handle_one(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n) if n else b""
+        p = self.path
+        if p.startswith("/redirect"):
+            left = int(p.split("/")[-1])
+            loc = f"/redirect/{left-1}" if left > 0 else "/final"
+            self.send_response(302)
+            self.send_header("Location", loc)
+            self.end_headers(); return
+        if p.startswith("/status/"):
+            self._send(int(p.split("/")[-1]), b'{"code":"teapot"}')
+            return
+        if p == "/gz":
+            self._send(200, b'{"gz":"ok"}', gz=True); return
+        if p == "/bin":
+            self._send(200, bytes(range(256)), ctype="application/octet-stream"); return
+        if p == "/slow":
+            time.sleep(30); self._send(200, b'{"slow":1}'); return
+        echo = {
+            "method": self.command,
+            "path": p,
+            "headers": {k.lower(): v for k, v in self.headers.items()
+                        if k.lower().startswith("x-test") or k.lower() in ("user-agent", "content-type")},
+            "body_len": len(body),
+            "body_head": body[:200].decode("utf-8", "replace"),
+        }
+        self._send(200, json.dumps(echo).encode())
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = handle_one
+    def log_message(self, *a): pass
+
+srv = socketserver.ThreadingTCPServer(("127.0.0.1", ECHO_PORT), Echo)
+srv.allow_reuse_address = True
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+# ---------- helpers ----------
+def call(method, path, headers=None, data=None, timeout=30):
+    req = urllib.request.Request(BASE + path, method=method, data=data)
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, {k.lower(): v for k, v in r.headers.items()}, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read()
+    except Exception as e:
+        return None, {}, str(e).encode()
+

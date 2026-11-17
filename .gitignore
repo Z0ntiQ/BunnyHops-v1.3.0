@@ -1,0 +1,6 @@
+# Артефакты сборки: пересобираются, в историю не входят
+target/
+frontend/dist/
+node_modules/
+*.log
+.DS_Store

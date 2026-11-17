@@ -1,0 +1,500 @@
+//! UI-компоненты: KvEditor, CopyButton, чипы статуса — 1:1 с App.jsx.
+
+use leptos::prelude::*;
+use leptos::callback::Callable;
+use wasm_bindgen::prelude::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+
+use crate::logic::{format_size, KvRow};
+
+pub const METHODS: [&str; 7] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+pub const BODYLESS: [&str; 2] = ["GET", "HEAD"];
+
+pub fn is_bodyless(m: &str) -> bool {
+    BODYLESS.contains(&m)
+}
+
+/* ---------- generic key/value editor (KvEditor) ---------- */
+
+fn parse_kv_text(text: &str) -> Vec<KvRow> {
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            let (k, v) = match l.find(':') {
+                Some(p) => (l[..p].trim(), l[p + 1..].trim()),
+                None => (l.trim(), ""),
+            };
+            let v = if v.len() >= 2
+                && ((v.starts_with('"') && v.ends_with('"'))
+                    || (v.starts_with('\'') && v.ends_with('\'')))
+            {
+                &v[1..v.len() - 1]
+            } else {
+                v
+            };
+            let key: String = k
+                .chars()
+                .filter(|c| {
+                    c.is_ascii_alphanumeric()
+                        || matches!(c, '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.' | '^' | '_' | '`' | '|' | '~')
+                })
+                .collect();
+            if key.is_empty() {
+                return None;
+            }
+            let value: String = v.chars().filter(|c| matches!(c, '\u{20}'..='\u{7e}')).collect();
+            Some(KvRow { key, value: value.trim_end().to_string(), on: true })
+        })
+        .collect()
+}
+
+fn kv_to_text(rows: &[KvRow]) -> String {
+    rows.iter()
+        .filter(|r| !r.key.trim().is_empty())
+        .map(|r| format!("{}: {}", r.key, r.value))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Максимум высоты панели журнала: от низа окна (отступ 30px) до нижней
+/// границы таб-бара (.tabs). Ручка высоты — actlog-resize в панели журнала.
+/// Start dragging the log height from the panel's top-edge handle.
+/// Call AFTER setting the starting height.
+pub fn start_log_drag(ev: &web_sys::PointerEvent, lh: RwSignal<i32>) {
+    ev.prevent_default();
+    if let Some(t) = ev.target() {
+        if let Some(he) = t.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = he.set_pointer_capture(ev.pointer_id());
+        }
+    }
+    let drag_start = create_rw_signal(Some((ev.client_y(), lh.get_untracked())));
+    let mv: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::PointerEvent)>>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+    let up: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::PointerEvent)>>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+    let mv_c = Closure::wrap(Box::new(move |ev: web_sys::PointerEvent| {
+        if let Some((y0, h0)) = drag_start.get() {
+            let max = log_h_max();
+            lh.set((h0 + (y0 - ev.client_y())).clamp(60, max));
+        }
+    }) as Box<dyn FnMut(_)>);
+    let (mv2, up2) = (mv.clone(), up.clone());
+    let up_c = Closure::wrap(Box::new(move |_: web_sys::PointerEvent| {
+        drag_start.set(None);
+        crate::app::ls_set("hoplite.logH", &lh.get_untracked().to_string());
+        if let Some(w) = web_sys::window() {
+            if let Some(m) = mv2.borrow().as_ref() {
+                let _ = w.remove_event_listener_with_callback(
+                    "pointermove", m.as_ref().unchecked_ref());
+            }
+            if let Some(u) = up2.borrow().as_ref() {
+                let _ = w.remove_event_listener_with_callback(
+                    "pointerup", u.as_ref().unchecked_ref());
+            }
+        }
+        // снять с себя владение, но НЕ дропать: up-замыкание
+        // исполняется прямо сейчас, drop = use-after-free.
+        std::mem::forget(mv2.borrow_mut().take());
+        std::mem::forget(up2.borrow_mut().take());
+    }) as Box<dyn FnMut(_)>);
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback(
+            "pointermove", mv_c.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback(
+            "pointerup", up_c.as_ref().unchecked_ref());
+    }
+    *mv.borrow_mut() = Some(mv_c);
+    *up.borrow_mut() = Some(up_c);
+}
+
+fn log_h_max() -> i32 {
+    let Some(win) = web_sys::window() else { return 600 };
+    let inner = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(900.0) as i32;
+    let bottom = win
+        .document()
+        .and_then(|d| d.query_selector(".tabs").ok().flatten())
+        .map(|e| e.get_bounding_client_rect().bottom() as i32)
+        .unwrap_or(inner - 210);
+    (inner - 30 - bottom).max(60)
+}
+
+/// get_rows/set_rows — произвольное хранилище (сигнал или строка внутри шага),
+/// как rows/onChange в React-версии.
+#[component]
+pub fn KvEditor(
+    get_rows: Callback<(), Vec<KvRow>>,
+    set_rows: Callback<Vec<KvRow>>,
+    key_placeholder: &'static str,
+    value_placeholder: &'static str,
+) -> impl IntoView {
+    let bulk_open = create_rw_signal(false);
+    let bulk_text = create_rw_signal(String::new());
+    let bulk_ta = create_node_ref::<leptos::html::Textarea>();
+
+    // Открытие: наполнить поле из строк, показать панель, увести фокус в textarea.
+    let open_bulk = {
+        let get_rows = get_rows.clone();
+        move |_: leptos::ev::MouseEvent| {
+            bulk_text.set(kv_to_text(&get_rows.run(())));
+            bulk_open.set(true);
+            if let Some(w) = web_sys::window() {
+                let cb = Closure::once_into_js(move || {
+                    if let Some(el) = bulk_ta.get() {
+                        let _ = el.focus();
+                    }
+                });
+                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    cb.as_ref().unchecked_ref(),
+                    60,
+                );
+            }
+        }
+    };
+    let close_bulk = move |_: leptos::ev::MouseEvent| bulk_open.set(false);
+
+    view! {
+        <div class="kv-list" class:bulk-open=move || bulk_open.get()>
+            <div class="kv-toolbar">
+                <div class="morph" class:morph-open=move || bulk_open.get()>
+                    <button
+                        class="morph-pill"
+                        aria-haspopup="dialog"
+                        aria-expanded=move || bulk_open.get().to_string()
+                        on:click=open_bulk
+                    >
+                        <svg aria-hidden="true" width="14" height="14" fill="none" viewBox="0 0 16 16">
+                            <path
+                                d="M2.75 4.25a1.5 1.5 0 0 1 1.5-1.5h7.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-2.75 2.5v-2.5a1.5 1.5 0 0 1-1.5-1.5v-5Z"
+                                stroke="currentColor" stroke-linejoin="round" stroke-width="1.4"
+                            />
+                        </svg>
+                        "Bulk edit"
+                    </button>
+                    <Show when={move || bulk_open.get()}>
+                        <div class="morph-panel" role="dialog" aria-label="Bulk edit">
+                            <div class="morph-head">
+                                <svg aria-hidden="true" width="14" height="14" fill="none" viewBox="0 0 16 16">
+                                    <path
+                                        d="M2.75 4.25a1.5 1.5 0 0 1 1.5-1.5h7.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-2.75 2.5v-2.5a1.5 1.5 0 0 1-1.5-1.5v-5Z"
+                                        stroke="currentColor" stroke-linejoin="round" stroke-width="1.4"
+                                    />
+                                </svg>
+                                "Bulk edit"
+                            </div>
+                            <textarea
+                                class="kv-bulk-text"
+                                node_ref=bulk_ta
+                                prop:value=bulk_text
+                                placeholder="Header: value — по одной строке"
+                                spellcheck="false"
+                                on:input=move |ev| {
+                                    let t = input_value(ev);
+                                    bulk_text.set(t.clone());
+                                    set_rows.run(parse_kv_text(&t));
+                                }
+                                on:keydown=move |ev: leptos::ev::KeyboardEvent| {
+                                    if ev.key() == "Escape" {
+                                        ev.stop_propagation();
+                                        bulk_open.set(false);
+                                    } else if ev.key() == "Enter"
+                                        && (ev.meta_key() || ev.ctrl_key())
+                                    {
+                                        ev.prevent_default();
+                                        bulk_open.set(false);
+                                    }
+                                }
+                            />
+                            <div class="morph-foot">
+                                <span class="morph-hint">{"применяется сразу · ⌘↵ или Esc — закрыть"}</span>
+                                <button class="morph-done" on:click=close_bulk>"Готово"</button>
+                            </div>
+                        </div>
+                    </Show>
+                </div>
+                <div class="kv-toolbar-right">
+                    <button
+                        class="kv-add"
+                        on:click=move |_| {
+                            let mut rs = get_rows.run(());
+                            rs.push(KvRow { key: String::new(), value: String::new(), on: true });
+                            set_rows.run(rs);
+                        }
+                    >
+                        "+ Add new"
+                    </button>
+                </div>
+            </div>
+            <For
+                each={move || get_rows.run(()).into_iter().enumerate().collect::<Vec<_>>()}
+                key={|(i, _)| *i}
+                children={move |(i, row)| {
+                    let key_ref = create_node_ref::<leptos::html::Input>();
+                    let val_ref = create_node_ref::<leptos::html::Input>();
+                    let chk_ref = create_node_ref::<leptos::html::Input>();
+                    create_effect(move |_| {
+                        let rs = get_rows.run(());
+                        if let Some(r) = rs.get(i) {
+                            if let Some(el) = chk_ref.get() {
+                                if el.checked() != r.on { el.set_checked(r.on); }
+                            }
+                            if let Some(el) = key_ref.get() {
+                                if el.value() != r.key { el.set_value(&r.key); }
+                            }
+                            if let Some(el) = val_ref.get() {
+                                if el.value() != r.value { el.set_value(&r.value); }
+                            }
+                        }
+                    });
+                    view! {
+                        <div class="kv-row">
+                            <input
+                                node_ref=chk_ref
+                                type="checkbox"
+                                class="kv-check"
+                                prop:checked=row.on
+                                on:change=move |ev| {
+                                    let mut rs = get_rows.run(());
+                                    if i < rs.len() {
+                                        rs[i].on = input_checked(ev);
+                                    }
+                                    set_rows.run(rs);
+                                }
+                                title="Включить/выключить"
+                            />
+                            <input
+                                node_ref=key_ref
+                                class="kv-input"
+                                prop:value=row.key
+                                placeholder=key_placeholder
+                                spellcheck="false"
+                                on:input=move |ev| {
+                                    let v = input_value(ev);
+                                    let mut rs = get_rows.run(());
+                                    if i < rs.len() {
+                                        rs[i].key = v;
+                                    }
+                                    set_rows.run(rs);
+                                }
+                            />
+                            <input
+                                node_ref=val_ref
+                                class="kv-input"
+                                prop:value=row.value
+                                placeholder=value_placeholder
+                                spellcheck="false"
+                                on:input=move |ev| {
+                                    let v = input_value(ev);
+                                    let mut rs = get_rows.run(());
+                                    if i < rs.len() {
+                                        rs[i].value = v;
+                                    }
+                                    set_rows.run(rs);
+                                }
+                            />
+                            <button
+                                class="kv-remove"
+                                title="Удалить"
+                                on:click=move |_| {
+                                    let mut rs = get_rows.run(());
+                                    if i < rs.len() {
+                                        rs.remove(i);
+                                    }
+                                    set_rows.run(rs);
+                                }
+                            >
+                                "×"
+                            </button>
+                        </div>
+                    }
+                }}
+            />
+        </div>
+    }
+}
+
+/* ---------- копирование в буфер с фолбэком (copyText) ---------- */
+
+async fn copy_text(text: &str) -> bool {
+    let win = web_sys::window().unwrap();
+    let nav = win.navigator();
+    let clip = nav.clipboard();
+    if JsFuture::from(clip.write_text(text)).await.is_ok() {
+        return true;
+    }
+    // фолбэк: скрытый textarea + document.execCommand('copy')
+    let doc = win.document().unwrap();
+    let ta: web_sys::HtmlTextAreaElement = doc
+        .create_element("textarea")
+        .unwrap()
+        .dyn_into()
+        .unwrap();
+    ta.set_value(text);
+    let style = ta.dyn_ref::<web_sys::HtmlElement>().unwrap().style();
+    let _ = style.set_property("position", "fixed");
+    let _ = style.set_property("opacity", "0");
+    doc.body().unwrap().append_child(&ta).unwrap();
+    ta.select();
+    let ok = doc
+        .clone()
+        .dyn_into::<web_sys::HtmlDocument>()
+        .ok()
+        .and_then(|d| d.exec_command("copy").ok())
+        .unwrap_or(false);
+    let _ = doc.body().unwrap().remove_child(&ta);
+    ok
+}
+
+#[component]
+pub fn CopyButton(
+    get_text: Callback<(), String>,
+    ok: ReadSignal<bool>,
+    on_copied: Callback<()>,
+    title: &'static str,
+) -> impl IntoView {
+    view! {
+        <button
+            class=move || if ok.get() { "copy-btn ok" } else { "copy-btn" }
+            title=move || if ok.get() { "Скопировано!".to_string() } else { title.to_string() }
+            on:click=move |_| {
+                let text = get_text.run(());
+                let ok_c = on_copied.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    if copy_text(&text).await {
+                        ok_c.run(());
+                    }
+                });
+            }
+        >
+            {move || if ok.get() { "✓".to_string() } else { "⧉".to_string() }}
+        </button>
+    }
+}
+
+/* ---------- resultChip / failChip ---------- */
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StepResult {
+    pub status: StepStatusVal,
+    #[serde(default)]
+    pub time_ms: f64,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub capture_note: String,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum StepStatusVal {
+    Code(u16),
+    Text(String),
+}
+
+fn status_class(code: u16) -> &'static str {
+    if code < 400 {
+        "s-2xx"
+    } else if code < 500 {
+        "s-4xx"
+    } else {
+        "s-5xx"
+    }
+}
+
+pub fn result_chip(r: StepResult) -> AnyView {
+    let cls = match &r.status {
+        StepStatusVal::Code(c) => status_class(*c),
+        StepStatusVal::Text(_) => "s-5xx",
+    };
+    let status_text = match &r.status {
+        StepStatusVal::Code(c) => c.to_string(),
+        StepStatusVal::Text(t) => t.clone(),
+    };
+    view! {
+        <>
+            <span class=format!("status-chip mini {cls}")>{status_text}</span>
+            <span class="mini-meta">{format!("{:.0} ms", r.time_ms)}</span>
+            <span class="mini-meta">{format_size(Some(r.bytes))}</span>
+            <Show when={let n = r.capture_note.clone(); move || !n.is_empty()}>
+                <span class="mini-meta capture-ok">{r.capture_note.clone()}</span>
+            </Show>
+        </>
+    }
+    .into_any()
+}
+
+pub fn fail_chip(r: StepResult) -> AnyView {
+    let status_text = match &r.status {
+        StepStatusVal::Code(c) => c.to_string(),
+        StepStatusVal::Text(t) => t.clone(),
+    };
+    view! {
+        <>
+            <span class="status-chip mini s-5xx">{status_text}</span>
+            <Show when={let ms = r.time_ms; move || ms != 0.0}>
+                <span class="mini-meta">{format!("{:.0} ms", r.time_ms)}</span>
+            </Show>
+            <Show when={let n = r.capture_note.clone(); move || !n.is_empty()}>
+                <span class="mini-meta capture-warn">{r.capture_note.clone()}</span>
+            </Show>
+        </>
+    }
+    .into_any()
+}
+
+/* ---------- DOM helpers ---------- */
+
+pub fn input_value(ev: web_sys::Event) -> String {
+    ev.target()
+        .unwrap()
+        .dyn_into::<web_sys::HtmlElement>()
+        .unwrap()
+        .dyn_ref::<web_sys::HtmlInputElement>()
+        .map(|i| i.value())
+        .or_else(|| {
+            ev.target()
+                .unwrap()
+                .dyn_ref::<web_sys::HtmlTextAreaElement>()
+                .map(|t| t.value())
+        })
+        .unwrap_or_default()
+}
+
+pub fn input_checked(ev: web_sys::Event) -> bool {
+    ev.target()
+        .unwrap()
+        .dyn_ref::<web_sys::HtmlInputElement>()
+        .map(|i| i.checked())
+        .unwrap_or(false)
+}
+
+pub fn select_value(ev: web_sys::Event) -> String {
+    ev.target()
+        .unwrap()
+        .dyn_into::<web_sys::HtmlSelectElement>()
+        .map(|s| s.value())
+        .unwrap_or_default()
+}
+
+pub fn new_id() -> String {
+    let uuid = web_sys::window()
+        .and_then(|w| w.crypto().ok())
+        .map(|c| c.random_uuid())
+        .unwrap_or_default();
+    if !uuid.is_empty() {
+        return uuid;
+    }
+    format!("{}-{}", js_now(), js_random())
+}
+
+pub fn js_now() -> f64 {
+    web_sys::window().map(|w| w.performance().unwrap().now()).unwrap_or(0.0)
+}
+
+pub fn js_random() -> f64 {
+    js_sys::Math::random()
+}

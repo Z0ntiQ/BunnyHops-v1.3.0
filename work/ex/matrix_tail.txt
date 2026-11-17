@@ -1,0 +1,40 @@
+st, hdr, b = call("GET", P("https://zontiq.ru/"), timeout=25)
+check("ETIMEDOUT <=11s", st == 502 and b"ETIMEDOUT" in b and time.time() - t0 < 11.5, f"{time.time()-t0:.1f}s")
+st, hdr, b = call("GET", P(E + "/slow"), timeout=130)
+check("общий таймаут 120s (slow 30s проходит)", st == 200)
+
+# ---------- 9. real internet ----------
+st, hdr, b = call("GET", P("https://ya.ru/"), timeout=20)
+check("внешний GET ya.ru", st == 200 and len(b) > 1000, f"len={len(b)}")
+
+# ---------- 10. API log & x-hop-ui filter ----------
+st, _, b = call("GET", "/api/automation-rules")
+log1 = json.loads(b)
+check("журнал /api/automation-rules", st == 200 and isinstance(log1, list) and len(log1) > 0)
+logged = {(c["method"], c["url"]) for c in log1}
+check("журнал пишет не-UI прокси-вызовы", ("POST", E + "/b") in logged or ("GET", E + "/m") in logged)
+check("журнал логирует реальные статусы (нет 0)", all(c["status"] != 0 for c in log1))
+n_before = len(log1)
+call("GET", P(E + "/h"), headers={"x-hop-ui": "1"})
+st, _, b = call("GET", "/api/automation-rules")
+check("x-hop-ui не попадает в журнал", len(json.loads(b)) == n_before)
+
+# ---------- 11. static SPA ----------
+st, hdr, b = call("GET", "/")
+check("статика / отдаёт HTML", st == 200 and b"<html" in b.lower())
+st, hdr, b = call("GET", "/some/spa/route")
+check("SPA-fallback отдаёт index", st == 200 and b"<html" in b.lower())
+
+# ---------- 12. screenshot ----------
+st, hdr, b = call("GET", "/screenshot?match=localhost:3000", timeout=40)
+is_png = b[:8] == b"\x89PNG\r\n\x1a\n"
+check("screenshot PNG", st == 200 and is_png, f"code={st} type={hdr.get('content-type')}")
+
+# ---------- report ----------
+srv.shutdown()
+fails = [r for r in results if not r[1]]
+w = max(len(r[0]) for r in results) + 2
+for name, ok, detail in results:
+    print(("PASS  " if ok else "FAIL  ") + name.ljust(w) + (detail or ""))
+print(f"\n=== {len(results)-len(fails)}/{len(results)} passed, {len(fails)} failed ===")
+sys.exit(1 if fails else 0)

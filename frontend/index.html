@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link data-trunk rel="copy-file" href="brand.png" />
+    <link rel="icon" type="image/png" href="/brand.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bunny Hops — REST Client</title>
+    <link data-trunk rel="css" href="styles.css" />
+    <link data-trunk rel="rust" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+    // Живой поиск: жёлтые метки на точных совпадениях + выпадающий список
+    // совпадений под счётчиком (префикс = область: URL/Параметры/Заголовки/
+    // Тело запроса/Сценарий/Ответ...). Клик по строке прокручивает к метке
+    // или фокусирует поле ввода с выделением найденного.
+    (function () {
+      var matches = [];
+
+      function areaLabel(el) {
+        if (el.closest('.urlbar')) return 'URL';
+        if (el.closest('.vars-preview-line')) return 'Переменные';
+        if (el.closest('.steps-panel')) return 'Сценарий';
+        if (el.closest('.kv-list')) {
+          var t = [...document.querySelectorAll('.tab.active')].map(function (b) { return b.textContent; }).join(' ');
+          if (/Headers/.test(t)) return 'Заголовки';
+          if (/Scenario/.test(t)) return 'Сценарий';
+          if (/Vars/.test(t)) return 'Переменные';
+          return 'Параметры';
+        }
+        if (el.closest('.body-editor')) return 'Тело запроса';
+        if (el.closest('.response-lines')) return 'Ответ · тело';
+        if (el.closest('.headers-table')) return 'Ответ · заголовки';
+        if (el.closest('.response-meta')) return 'Ответ · статус';
+        return 'Экран';
+      }
+
+      function clearMarks() {
+        document.querySelectorAll('mark.search-mark').forEach(function (m) {
+          m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
+        });
+        document.querySelectorAll('.search-hit').forEach(function (el) {
+          el.classList.remove('search-hit');
+        });
+      }
+
+      function closeDropdown() {
+        var dd = document.getElementById('hop-dd');
+        if (dd) dd.remove();
+      }
+
+      function snippetNode(text, at, len) {
+        var from = Math.max(0, at - 40), to = Math.min(text.length, at + len + 40);
+        var el = document.createElement('span');
+        el.className = 'hop-dd-snip';
+        if (from > 0) el.appendChild(document.createTextNode('…'));
+        el.appendChild(document.createTextNode(text.slice(from, at)));
+        var b = document.createElement('b');
+        b.textContent = text.slice(at, at + len);
+        el.appendChild(b);
+        el.appendChild(document.createTextNode(text.slice(at + len, to)));
+        if (to < text.length) el.appendChild(document.createTextNode('…'));
+        return el;
+      }
+
+      function openDropdown() {
+        closeDropdown();
+        if (!matches.length) return;
+        var anchor = document.querySelector('.search-input');
+        if (!anchor) return;
+        var rect = anchor.getBoundingClientRect();
+        var dd = document.createElement('div');
+        dd.id = 'hop-dd';
+        dd.style.position = 'fixed';
+        dd.style.top = (rect.bottom + 6) + 'px';
+        dd.style.right = (window.innerWidth - rect.right) + 'px';
+        matches.forEach(function (m, idx) {
+          var item = document.createElement('div');
+          item.className = 'hop-dd-item';
+          var tag = document.createElement('span');
+          tag.className = 'hop-dd-tag';
+          tag.textContent = m.label;
+          item.appendChild(tag);
+          item.appendChild(snippetNode(m.text, m.at, m.len));
+          item.addEventListener('mousedown', function (ev) {
+            ev.preventDefault();
+            if (m.el) {
+              m.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              m.el.classList.add('search-mark-focus');
+              setTimeout(function () { m.el.classList.remove('search-mark-focus'); }, 1200);
+            } else if (m.input) {
+              m.input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              m.input.focus();
+              try { m.input.setSelectionRange(m.at, m.at + m.len); } catch (e) {}
+            }
+            closeDropdown();
+          });
+          dd.appendChild(item);
+        });
+        var cnt = matches.length;
+        var head = document.createElement('div');
+        head.className = 'hop-dd-head';
+        head.textContent = 'Совпадений: ' + cnt;
+        dd.appendChild(head);
+        document.body.appendChild(dd);
+      }
+
+      window.hopSearch = function (q) {
+        clearMarks();
+        closeDropdown();
+        matches = [];
+        if (!q) return 0;
+        var root = document.querySelector('.app');
+        if (!root) return 0;
+        var needle = q.toLowerCase();
+        var fields = root.querySelectorAll(
+          '.urlbar, .kv-list, .body-editor, .steps-panel, .response-meta, .response-lines, .headers-table, .vars-preview-line'
+        );
+        var hits = 0;
+        fields.forEach(function (f) {
+          var fieldHit = false;
+          // точные последовательности символов в текстовых узлах
+          var walker = document.createTreeWalker(f, NodeFilter.SHOW_TEXT, {
+            acceptNode: function (n) {
+              if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+              var p = n.parentNode;
+              if (!p || p.nodeName === 'INPUT' || p.nodeName === 'TEXTAREA' || p.nodeName === 'MARK' || p.nodeName === 'SCRIPT' || p.nodeName === 'STYLE') return NodeFilter.FILTER_REJECT;
+              return (n.nodeValue.toLowerCase().indexOf(needle) >= 0) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+            }
+          });
+          var nodes = [];
+          while (walker.nextNode()) nodes.push(walker.currentNode);
+          nodes.forEach(function (node) {
+            var text = node.nodeValue, lower = text.toLowerCase(), frag = document.createDocumentFragment(), pos = 0;
+            while (true) {
+              var at = lower.indexOf(needle, pos);
+              if (at < 0) break;
+              if (at > pos) frag.appendChild(document.createTextNode(text.slice(pos, at)));
+              var mk = document.createElement('mark');
+              mk.className = 'search-mark';
+              mk.textContent = text.slice(at, at + needle.length);
+              frag.appendChild(mk);
+              matches.push({ label: areaLabel(f), text: text, at: at, len: needle.length, el: mk });
+              hits++;
+              pos = at + needle.length;
+            }
+            if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+            node.parentNode.replaceChild(frag, node);
+            fieldHit = true;
+          });
+          // значения полей ввода: подсветить поле целиком, в список — по вхождению
+          var inputs = f.querySelectorAll('input, textarea');
+          for (var i = 0; i < inputs.length; i++) {
+            var val = inputs[i].value || "", lowerV = val.toLowerCase(), p2 = 0;
+            while (true) {
+              var at2 = lowerV.indexOf(needle, p2);
+              if (at2 < 0) break;
+              matches.push({ label: areaLabel(f), text: val, at: at2, len: needle.length, input: inputs[i] });
+              hits++;
+              p2 = at2 + needle.length;
+            }
+            if (p2 > 0) fieldHit = true;
+          }
+          if (fieldHit) f.classList.add('search-hit');
+        });
+        openDropdown();
+        return hits;
+      };
+
+      // клик по счётчику — заново открыть список
+      document.addEventListener('click', function (ev) {
+        if (ev.target.closest('.search-count')) {
+          if (document.getElementById('hop-dd')) closeDropdown();
+          else openDropdown();
+        }
+      });
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') closeDropdown();
+      });
+      window.addEventListener('resize', closeDropdown);
+    })();
+    </script>
+  </body>
+</html>

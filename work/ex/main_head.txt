@@ -1,0 +1,120 @@
+// Hop Lite — Rust-порт server.js + proxy-middleware.js, один в один по контракту.
+// Раздаёт SPA из dist/ и обрабатывает /proxy (стриминговый обход CORS).
+// Пути резолвятся от папки бинарника (или HOP_LITE_DIST), автоподбор порта,
+// автооткрытие браузера (отключается HOP_NO_BROWSER=1).
+
+use axum::body::{to_bytes, Body};
+use axum::extract::Request;
+use axum::http::{header::HeaderName, HeaderValue, Method, StatusCode};
+use axum::response::Response;
+use axum::routing::{any, get};
+use axum::Router;
+use futures_util::StreamExt;
+use std::collections::HashMap;
+use std::env;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const HOP_BY_HOP: &[&str] = &[
+    "host",
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "upgrade",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "expect",
+];
+
+// Эти нельзя копировать как есть: тело приходит уже распакованным,
+// а браузер попытался бы распаковать его ещё раз по content-encoding.
+const STRIP: &[&str] = &["content-length", "content-encoding", "transfer-encoding"];
+
+fn mime_for(ext: &str) -> &'static str {
+    match ext {
+        ".html" => "text/html; charset=utf-8",
+        ".js" => "text/javascript",
+        ".css" => "text/css",
+        ".svg" => "image/svg+xml",
+        ".png" => "image/png",
+        ".jpg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".json" => "application/json",
+        ".ico" => "image/x-icon",
+        ".txt" => "text/plain; charset=utf-8",
+        ".map" => "application/json",
+        ".wasm" => "application/wasm",
+        ".woff" => "font/woff",
+        ".woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+fn is_skipped(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    HOP_BY_HOP.contains(&n.as_str()) || STRIP.contains(&n.as_str())
+}
+
+/// Разрешает путь запроса внутри dist/ с защитой от выхода за root
+/// (аналог join+normalize+startsWith из server.js).
+fn resolve_static(root: &Path, raw_path: &str) -> Option<PathBuf> {
+    let decoded = percent_encoding::percent_decode_str(raw_path).decode_utf8_lossy().into_owned();
+    let clean = if decoded == "/" { "/index.html".to_string() } else { decoded };
+    let mut file = root.to_path_buf();
+    for c in Path::new(&clean).components() {
+        match c {
+            Component::Normal(seg) => file.push(seg),
+            Component::ParentDir => {
+                file.pop();
+            }
+            Component::RootDir | Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    if !file.starts_with(root) {
+        return None;
+    }
+    Some(file)
+}
+
+async fn serve_static_or_spa(root: &Path, req: Request) -> Response {
+    let raw_path = req.uri().path();
+    let mut file = match resolve_static(root, raw_path) {
+        Some(f) => f,
+        None => return spa_fallback(root).await,
+    };
+
+    // директория -> index.html, как в оригинале
+    if file.is_dir() {
+        file = file.join("index.html");
+    }
+    match tokio::fs::read(&file).await {
+        Ok(data) => {
+            let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let ct = mime_for(&format!(".{ext}"));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", ct)
+                .body(Body::from(data))
+                .unwrap()
+        }
+        Err(_) => spa_fallback(root).await, // SPA fallback
+    }
+}
+
+async fn spa_fallback(root: &Path) -> Response {
+    match tokio::fs::read(root.join("index.html")).await {
+        Ok(data) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Body::from(data))
+            .unwrap(),
+        Err(_) => Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from("Server error"))
+            .unwrap(),
