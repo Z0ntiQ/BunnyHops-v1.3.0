@@ -15,13 +15,25 @@ fn resolve_dist(app: &tauri::App) -> PathBuf {
             return p;
         }
     }
-    // 2. собранные ресурсы (.app/Contents/Resources/...)
-    if let Ok(res) = app.path().resolve("dist", tauri::path::BaseDirectory::Resource) {
-        if res.join("index.html").is_file() {
-            return res;
+    // 2. собранные ресурсы: "frontend/dist" кладётся в .app как
+    //    Contents/Resources/_up_/frontend/dist — резолвим и короткое имя, и
+    //    фактический путь с _up_ (иначе запуск из Finder/cwd≠build-дерева падает).
+    for rel in ["dist", "_up_/frontend/dist"] {
+        if let Ok(res) = app.path().resolve(rel, tauri::path::BaseDirectory::Resource) {
+            if res.join("index.html").is_file() {
+                return res;
+            }
         }
     }
-    // 3. dev-режим: cargo tauri dev запускается из desktop/, dist — рядом
+    // 3. рядом с бинарём внутри бандла: .../Contents/MacOS → .../Contents/Resources/_up_/frontend/dist
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(res) = exe.ancestors().nth(2).map(|p| p.join("Resources/_up_/frontend/dist")) {
+            if res.join("index.html").is_file() {
+                return res;
+            }
+        }
+    }
+    // 4. dev-режим: cargo tauri dev запускается из desktop/, dist — рядом
     PathBuf::from("../frontend/dist")
 }
 

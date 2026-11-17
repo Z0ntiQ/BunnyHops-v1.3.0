@@ -1,6 +1,7 @@
 pub mod app;
 mod actlog;
 mod method_select;
+mod pill_nav;
 mod search;
 mod steps_util;
 mod storage;

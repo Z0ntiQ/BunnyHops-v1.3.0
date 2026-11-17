@@ -12,6 +12,7 @@ use crate::ui::*;
 
 use crate::actlog::*;
 use crate::method_select::*;
+use crate::pill_nav;
 use crate::search::*;
 use crate::steps_util::*;
 use crate::storage::*;
@@ -1066,6 +1067,38 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Пилюля под активной вкладкой («Tab Pill», дизайн 17.11.2026): эффект пересобирает
+    // цель при смене вкладки, показе/скрытии вкладки Body и монтировании/размонтировании трека.
+    let req_track = create_node_ref::<leptos::html::Div>();
+    let resp_track = create_node_ref::<leptos::html::Div>();
+    let mut req_snap = true;
+    create_effect(move |_| {
+        let t = tab.get();
+        let hb = has_body.get();
+        if req_track.get().is_none() {
+            pill_nav::drop_pill("req-tabs");
+            req_snap = true;
+            return;
+        }
+        pill_nav::move_pill("req-tabs", pill_nav::req_tab_index(&t, hb), !req_snap);
+        req_snap = false;
+    });
+    let mut resp_snap = true;
+    create_effect(move |_| {
+        let t = resp_tab.get();
+        if resp_track.get().is_none() {
+            pill_nav::drop_pill("resp-tabs");
+            resp_snap = true;
+            return;
+        }
+        pill_nav::move_pill(
+            "resp-tabs",
+            Some(if t == "headers" { 1 } else { 0 }),
+            !resp_snap,
+        );
+        resp_snap = false;
+    });
+
     /* ---------- render (1:1 с App.jsx) ---------- */
     let url_preview_m = Memo::new(move |_| url_preview(&url.get(), &vars_map.get()));
     let enabled_headers = Memo::new(move |_| {
@@ -1292,9 +1325,11 @@ pub fn App() -> impl IntoView {
             <main class="panes">
                 <section class="pane">
                     <nav class="tabs">
+                        <div class="tab-track" id="req-tabs" node_ref=req_track>
+                        <span class="tab-pill"/>
                         <button class=move || if tab.get() == "params" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("params".to_string())>
-                            "Params"
+                            "URL Params"
                             <Show when={move || enabled_params.get() != 0}>
                                 <span class="tab-count">{move || enabled_params.get()}</span>
                             </Show>
@@ -1328,8 +1363,9 @@ pub fn App() -> impl IntoView {
                             <Show when={move || !vars_map.get().is_empty()}>
                                 <span class="tab-count">{move || vars_map.get().len()}</span>
                             </Show>
-                        </button>
-                    </nav>
+                            </button>
+                            </div>
+                            </nav>
 
                     <div class="pane-body">
                         <Show when={move || tab.get() == "params"}>
@@ -1615,10 +1651,13 @@ pub fn App() -> impl IntoView {
                             </Show>
                         </div>
                         <nav class="tabs">
+                            <div class="tab-track" id="resp-tabs" node_ref=resp_track>
+                            <span class="tab-pill"/>
                             <button class=move || if resp_tab.get() == "body" { "tab active" } else { "tab" }
                                 on:click=move |_| resp_tab.set("body".to_string())>"Response body"</button>
                             <button class=move || if resp_tab.get() == "headers" { "tab active" } else { "tab" }
                                 on:click=move |_| resp_tab.set("headers".to_string())>"Response headers"</button>
+                            </div>
                         </nav>
                         <Show when={move || {
                             let r = response.get();

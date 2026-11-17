@@ -20,6 +20,7 @@ web-sys = { version = "0.3", features = [
   "RequestInit", "RequestMode", "Response", "Storage", "TextDecoder",
   "TextDecodeOptions", "Url", "Window",
   "Clipboard", "Crypto", "EventTarget",
+  "CssStyleDeclaration", "MutationObserver", "MutationObserverInit", "Event", "NodeList",
   "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollBehavior",
 ] }
 serde = { version = "1", features = ["derive"] }

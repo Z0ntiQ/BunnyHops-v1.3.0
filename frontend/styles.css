@@ -7,6 +7,9 @@
   --text-dim: #8a92a6;
   --accent: #21c363;
   --accent-dim: rgba(33, 195, 99, 0.15);
+  /* «Tab Pill» (дизайн 17.11.2026): белая пилюля под активной вкладкой, текст на ней чёрный */
+  --pill: #ffffff;
+  --pill-text: #000000;
   --red: #f97066;
   --orange: #f8a04b;
   --blue: #4296ec;
@@ -952,13 +955,36 @@ mark.match.current {
 
 .tabs {
   display: flex;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-4) 0;
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4);
   background: var(--bg-panel);
 }
 
+/* «Tab Pill» (дизайн 17.11.2026): трек — капсула; под активной вкладкой белая
+   пилюля, её двигают пружины из pill_nav.rs (ведущий край жёсткий, ведомый мягкий). */
+.tab-track {
+  position: relative;
+  display: inline-flex;
+  gap: 2px;
+  padding: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+}
+
+.tab-pill {
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: 0;
+  border-radius: var(--radius-pill);
+  background: var(--pill);
+  pointer-events: none;
+  will-change: transform, width;
+}
+
 .tab {
+  position: relative;
+  z-index: 1;
   padding: var(--space-2) var(--space-5);
   border: none;
   background: none;
@@ -966,15 +992,19 @@ mark.match.current {
   font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  transition: color 0.25s;
+}
+
+.tab:hover:not(.active) {
+  color: var(--text);
 }
 
 .tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
+  color: var(--pill-text);
 }
 
 .tab-count {

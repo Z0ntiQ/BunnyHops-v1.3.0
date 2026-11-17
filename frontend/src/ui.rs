@@ -50,9 +50,18 @@ fn parse_kv_text(text: &str) -> Vec<KvRow> {
 }
 
 fn kv_to_text(rows: &[KvRow]) -> String {
+    // Все строки списка видны в Bulk edit, и пустые тоже (запрос пользователя
+    // 17.11.2026: создал строку «Add new» — она должна быть в окне).
+    // Пустая строка = пустая строка текста; при наборе лишние пустые строки
+    // отфильтрует parse_kv_text.
     rows.iter()
-        .filter(|r| !r.key.trim().is_empty())
-        .map(|r| format!("{}: {}", r.key, r.value))
+        .map(|r| {
+            if r.key.trim().is_empty() {
+                String::new()
+            } else {
+                format!("{}: {}", r.key, r.value)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
