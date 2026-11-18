@@ -23,7 +23,7 @@ use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 use tokio::time::sleep;
 
 use crate::control;
@@ -74,7 +74,7 @@ fn hub() -> &'static broadcast::Sender<Value> {
 }
 
 /// Publish любого события для WS-клиентов; без подписчиков событие теряется — это норма.
-fn publish(event: Value) {
+pub(crate) fn publish(event: Value) {
     if !is_enabled() {
         return;
     }
@@ -83,7 +83,7 @@ fn publish(event: Value) {
 
 /// Событие из журнала действий: вызывается из `control::log_action`.
 pub(crate) fn publish_action(area: &str, action: &str, details: &Value) {
-    publish(json!({"type": "action", "area": area, "action": action, "details": details, "ts": now_epoch()}));
+    publish(json!({"type": "action", "area": area, "action": action, "details": details, "ts": now_epoch()}))
 }
 
 fn now_epoch() -> u64 {
@@ -93,6 +93,34 @@ fn now_epoch() -> u64 {
         .unwrap_or(0)
 }
 
+// ---------- window activation channel ----------
+
+/// Отправитель команды активации окна (из сервера в Tauri main thread).
+fn window_activate_tx() -> &'static Mutex<Option<tokio::sync::oneshot::Sender<()>>> {
+    static TX: OnceLock<Mutex<Option<tokio::sync::oneshot::Sender<()>>>> = OnceLock::new();
+    TX.get_or_init(|| Mutex::new(None))
+}
+
+/// Установить отправителя активации окна (вызывается при старте сервера из desktop/main.rs).
+pub(crate) fn set_window_activate_tx(tx: tokio::sync::oneshot::Sender<()>) {
+    *window_activate_tx().lock().unwrap() = Some(tx);
+}
+
+/// Взять отправителя активации окна (потребляет его — однократный вызов).
+fn take_window_activate_tx() -> Option<tokio::sync::oneshot::Sender<()>> {
+    window_activate_tx().lock().unwrap().take()
+}
+
+/// Активировать окно: показать/восстановить/сфокусировать.
+/// Возвращает Ok(()) если команда отправлена, Err если отправителя нет.
+async fn window_activate() -> Result<(), String> {
+    if let Some(tx) = take_window_activate_tx() {
+        tx.send(()).map_err(|_| "receiver dropped".into())
+    } else {
+        Err("window activate channel not set".into())
+    }
+}
+
 // ---------- снимок UI от фронтенда ----------
 
 fn ui_store() -> &'static Mutex<Value> {
@@ -100,11 +128,11 @@ fn ui_store() -> &'static Mutex<Value> {
     S.get_or_init(|| Mutex::new(json!({"seq": 0, "state": {}})))
 }
 
-fn ui_seq() -> u64 {
+pub(crate) fn ui_seq() -> u64 {
     ui_store().lock().unwrap().get("seq").and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn ui_state() -> Value {
+pub(crate) fn ui_state() -> Value {
     ui_store().lock().unwrap().get("state").cloned().unwrap_or(json!({}))
 }
 
@@ -120,7 +148,7 @@ async fn ui_state_handler(Json(body): Json<Value>) -> Response {
 }
 
 /// Дождаться подтверждения от UI-клиента: новый снапшот после нашей команды.
-async fn wait_ui_echo(seq_before: u64) -> Value {
+pub(crate) async fn wait_ui_echo(seq_before: u64) -> Value {
     let deadline = Instant::now() + Duration::from_millis(2000);
     while Instant::now() < deadline {
         let seq = ui_seq();
@@ -134,7 +162,7 @@ async fn wait_ui_echo(seq_before: u64) -> Value {
 
 // ---------- полное состояние ----------
 
-fn full_state() -> Value {
+pub(crate) fn full_state() -> Value {
     let theme = control::read_store("theme.json");
     json!({
         "app": {
@@ -181,7 +209,7 @@ fn deep_merge(dst: &mut Value, src: &Value) {
 }
 
 /// Рекурсивный дифв двух состояний: только изменённые листья, с бюджетом записей.
-fn json_diff(before: &Value, after: &Value) -> Value {
+pub(crate) fn json_diff(before: &Value, after: &Value) -> Value {
     let mut out = Map::new();
     let mut budget = DIFF_BUDGET;
     diff_into("", before, after, &mut out, &mut budget);
@@ -305,7 +333,7 @@ fn actions_doc() -> &'static Value {
     })
 }
 
-fn is_known_action(action: &str) -> bool {
+pub(crate) fn is_known_action(action: &str) -> bool {
     actions_doc()
         .get("actions")
         .and_then(Value::as_array)
@@ -449,7 +477,7 @@ fn eval_store() -> &'static Mutex<Value> {
 
 /// Каталог BROOP: объекты и их действия. Файл в репозитории; назначение каждого
 /// объекта — карта экрана, по ней ориентимся на местности без скриншотов.
-fn broop_doc() -> &'static Value {
+pub(crate) fn broop_doc() -> &'static Value {
     static D: OnceLock<Value> = OnceLock::new();
     D.get_or_init(|| {
         serde_json::from_str(include_str!("../docs/broop.json"))
@@ -458,7 +486,7 @@ fn broop_doc() -> &'static Value {
 }
 
 /// Живая библиотека элементов, как её прислал UI.
-fn live_elements() -> Vec<Value> {
+pub(crate) fn live_elements() -> Vec<Value> {
     elements_store()
         .lock()
         .unwrap()
@@ -469,7 +497,7 @@ fn live_elements() -> Vec<Value> {
 }
 
 /// Интерактивные элементы DOM без `data-bh` — присланы фронтом как гейт разметки.
-fn live_unmarked() -> Vec<Value> {
+pub(crate) fn live_unmarked() -> Vec<Value> {
     elements_store()
         .lock()
         .unwrap()
@@ -480,15 +508,79 @@ fn live_unmarked() -> Vec<Value> {
 }
 
 /// Совпадает ли живой id с записью каталога (запись с `.*` — префикс динамической строки).
-fn matches_catalog(pattern: &str, id: &str) -> bool {
+pub(crate) fn matches_catalog(pattern: &str, id: &str) -> bool {
     match pattern.strip_suffix(".*") {
         Some(prefix) => id.starts_with(prefix) && id.len() > prefix.len() + 1,
         None => pattern == id,
     }
 }
 
-fn element_id(el: &Value) -> &str {
+pub(crate) fn element_id(el: &Value) -> &str {
     el.get("id").and_then(Value::as_str).unwrap_or("")
+}
+
+/// --- Gate check for element actions ---
+
+/// Причина отказа gate_check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateReject {
+    NotFound,
+    Disabled,
+    Invisible,
+}
+
+/// Элемент, прошедший gate_check.
+#[derive(Debug, Clone)]
+pub struct GateItem {
+    pub id: String,
+    pub enabled: bool,
+    pub visible: bool,
+}
+
+/// Чистая проверка элемента по списку живых элементов.
+/// Возвращает элемент, если он есть, включен и видим; иначе — причину отказа.
+fn gate_check_elements(live: &[Value], id: &str) -> Result<GateItem, GateReject> {
+    let el = live.iter().find(|e| element_id(e) == id).ok_or(GateReject::NotFound)?;
+    let enabled = el.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+    let visible = el.get("visible").and_then(Value::as_bool).unwrap_or(true);
+    if !enabled {
+        return Err(GateReject::Disabled);
+    }
+    if !visible {
+        return Err(GateReject::Invisible);
+    }
+    Ok(GateItem {
+        id: id.to_string(),
+        enabled,
+        visible,
+    })
+}
+
+/// Проверка элемента по глобальной живой карте.
+pub(crate) fn gate_check(id: &str) -> Result<GateItem, GateReject> {
+    gate_check_elements(&live_elements(), id)
+}
+
+/// Реестр oneshot-каналов для ожидания обновления карты элементов (round-trip).
+fn elements_wait_registry() -> &'static Mutex<HashMap<String, oneshot::Sender<()>>> {
+    static R: OnceLock<Mutex<HashMap<String, oneshot::Sender<()>>>> = OnceLock::new();
+    R.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Зарегистрировать ожидание обновления элемента. Возвращает receiver, который
+/// сработает когда UI пришлёт POST /debug/elements (в elements_handler).
+pub(crate) fn register_elements_wait(id: &str) -> oneshot::Receiver<()> {
+    let (tx, rx) = oneshot::channel();
+    elements_wait_registry().lock().unwrap().insert(id.to_string(), tx);
+    rx
+}
+
+/// Вызвать из elements_handler после обновления карты: пробудить ожидающих.
+fn notify_elements_waiters() {
+    let mut reg = elements_wait_registry().lock().unwrap();
+    for (_, tx) in reg.drain() {
+        let _ = tx.send(());
+    }
 }
 
 /// UI присылает библиотеку после hello и после каждой применённой команды.
@@ -499,6 +591,8 @@ async fn elements_handler(Json(body): Json<Value>) -> Response {
         .map(|a| a.len())
         .unwrap_or(0);
     *elements_store().lock().unwrap() = body;
+    // Пробудить задачи, ожидающие обновления карты (round-trip для NotFound).
+    notify_elements_waiters();
     control::json_response(StatusCode::OK, &json!({"ok": true, "count": count}))
 }
 
@@ -599,7 +693,7 @@ async fn broop_get_handler(Query(params): Query<HashMap<String, String>>) -> Res
 }
 
 /// Выполняет действие и возвращает (состояние до, состояние после, результат).
-async fn run_action(action: &str, payload: Value) -> (Value, Value, Result<Value, (StatusCode, String)>) {
+pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, Result<Value, (StatusCode, String)>) {
     let before = full_state();
     let result: Result<Value, (StatusCode, String)> = match action {
         "ui.set" => {
@@ -631,16 +725,61 @@ async fn run_action(action: &str, payload: Value) -> (Value, Value, Result<Value
         "element.click" => {
             let id = payload.get("id").and_then(Value::as_str).unwrap_or("");
             if id.is_empty() {
-                Err((StatusCode::BAD_REQUEST, "нужен payload {\"id\": \"<объект BROOP>\"}".into()))
-            } else if live_elements().into_iter().all(|el| element_id(&el) != id) {
                 Err((
-                    StatusCode::NOT_FOUND,
-                    format!("объект «{id}» не на экране; карта — GET /debug/broop"),
+                    StatusCode::BAD_REQUEST,
+                    "нужен payload {\"id\": \"<объект BROOP>\"}".into(),
                 ))
             } else {
-                let seq_before = ui_seq();
-                publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
-                Ok(wait_ui_echo(seq_before).await)
+                // First gate_check attempt.
+                match gate_check(id) {
+                    Ok(_) => {
+                        let seq_before = ui_seq();
+                        publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
+                        Ok(wait_ui_echo(seq_before).await)
+                    }
+                    Err(GateReject::NotFound) => {
+                        // Round-trip: ask UI to collect elements, wait for POST /debug/elements.
+                        publish(json!({"action": "elements.collect"}));
+                        let rx = register_elements_wait(id);
+                        let wait_result = tokio::time::timeout(Duration::from_millis(2000), rx).await;
+                        if wait_result.is_err() {
+                            // Timeout - return NotFound with guidance.
+                            Err((
+                                StatusCode::NOT_FOUND,
+                                format!("объект «{id}» не на экране; карта — GET /debug/broop (таймаут обновления карты)"),
+                            ))
+                        } else {
+                            // Retry gate_check once after round-trip.
+                            match gate_check(id) {
+                                Ok(_) => {
+                                    let seq_before = ui_seq();
+                                    publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
+                                    Ok(wait_ui_echo(seq_before).await)
+                                }
+                                Err(GateReject::NotFound) => Err((
+                                    StatusCode::NOT_FOUND,
+                                    format!("объект «{id}» не на экране после обновления карты; карта — GET /debug/broop"),
+                                )),
+                                Err(GateReject::Disabled) => Err((
+                                    StatusCode::FORBIDDEN,
+                                    format!("объект «{id}» отключен (disabled)"),
+                                )),
+                                Err(GateReject::Invisible) => Err((
+                                    StatusCode::FORBIDDEN,
+                                    format!("объект «{id}» невидим (invisible)"),
+                                )),
+                            }
+                        }
+                    }
+                    Err(GateReject::Disabled) => Err((
+                        StatusCode::FORBIDDEN,
+                        format!("объект «{id}» отключен (disabled)"),
+                    )),
+                    Err(GateReject::Invisible) => Err((
+                        StatusCode::FORBIDDEN,
+                        format!("объект «{id}» невидим (invisible)"),
+                    )),
+                }
             }
         }
         "eval" => {
@@ -777,6 +916,14 @@ async fn handle_socket(mut socket: WebSocket) {
 
 // ---------- маршруты ----------
 
+/// Активировать окно (показать/восстановить/сфокусировать).
+async fn window_activate_handler() -> Response {
+    match window_activate().await {
+        Ok(()) => control::json_response(StatusCode::OK, &json!({"ok": true, "status": "activated"})),
+        Err(e) => control::json_response(StatusCode::SERVICE_UNAVAILABLE, &json!({"ok": false, "error": e})),
+    }
+}
+
 pub(crate) fn contract_router<S: Clone + Send + Sync + 'static>() -> Router<S> {
     Router::new().route("/debug/openapi.json", get(openapi_handler))
 }
@@ -796,6 +943,7 @@ pub(crate) fn mcp_router<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route("/debug/broop", get(broop_handler))
         .route("/debug/broop/get", get(broop_get_handler))
         .route("/debug/stream", get(ws_handler))
+        .route("/debug/window/activate", post(window_activate_handler))
 }
 
 /// Гейт MCP-поверхности: проускает при включённом гейте или когда запрос помечен
@@ -808,4 +956,37 @@ pub(crate) async fn gate_or_ui(req: Request, next: axum::middleware::Next) -> Re
         return next.run(req).await;
     }
     disabled_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_live_element(id: &str, enabled: bool, visible: bool) -> Value {
+        json!({"id": id, "enabled": enabled, "visible": visible})
+    }
+
+    #[test]
+    fn gate_rejects_disabled() {
+        let live = vec![make_live_element("btn.disabled", false, true)];
+        let err = gate_check_elements(&live, "btn.disabled").unwrap_err();
+        assert_eq!(err, GateReject::Disabled);
+    }
+
+    #[test]
+    fn gate_rejects_then_refreshes_via_roundtrip() {
+        // Empty live list → NotFound; after "round-trip" (simulated elements push),
+        // retry gate_check should succeed.
+        let live: Vec<Value> = vec![];
+        let err = gate_check_elements(&live, "mock.add_rule").unwrap_err();
+        assert_eq!(err, GateReject::NotFound);
+
+        // Simulate the round-trip: UI posts elements, live now has the item.
+        let live2 = vec![make_live_element("mock.add_rule", true, true)];
+        let item = gate_check_elements(&live2, "mock.add_rule").unwrap();
+        assert_eq!(item.id, "mock.add_rule");
+        assert!(item.enabled);
+        assert!(item.visible);
+    }
 }

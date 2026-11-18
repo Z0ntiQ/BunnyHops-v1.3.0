@@ -38,6 +38,9 @@ fn resolve_dist(app: &tauri::App) -> PathBuf {
 }
 
 fn main() {
+    // Создаём oneshot-канал для активации окна (показать/восстановить/сфокусировать).
+    let (window_activate_tx, mut window_activate_rx) = tokio::sync::oneshot::channel::<()>();
+
     tauri::Builder::default()
         // Обещание баннера: закрытие окна останавливает сервер и процесс
         // (дефолт Tauri v2 — Wait: процесс висит без окна).
@@ -52,9 +55,11 @@ fn main() {
             let dist = resolve_dist(app);
 
             let (tx, rx) = mpsc::channel::<Result<u16, String>>();
+            // Передаём sender в run_server для активации окна.
+            let window_tx = window_activate_tx;
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                let res = rt.block_on(run_server(dist, None)); // порт всегда рандомизируется (правило пользователя 17.11.2026)
+                let res = rt.block_on(run_server(dist, None, Some(window_tx)));
                 let _ = tx.send(res);
                 // держим runtime живым: serve-задача крутится на нём;
                 // поток умрёт вместе с процессом (закрытие окна)
@@ -72,7 +77,7 @@ fn main() {
             };
 
             let url = format!("http://127.0.0.1:{port}");
-            let _win = tauri::WebviewWindowBuilder::new(
+            let win = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::External(url.parse().unwrap()),
@@ -81,6 +86,17 @@ fn main() {
             .inner_size(1280.0, 800.0)
             .min_inner_size(900.0, 600.0)
             .build()?;
+
+            // Слушаем команды активации окна и применяем их на главном потоке Tauri.
+            let window = win.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = window_activate_rx.await;
+                // Показать/восстановить/сфокусировать окно.
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            });
+
             Ok(())
         })
         // Последняя запись журнала — на RunEvent::Exit: он приходит на ЛЮБОМ

@@ -361,13 +361,19 @@ pub mod control;
 pub mod mock_server;
 pub mod mock_random;
 pub mod debug_api;
+pub mod rpc_api;
 use screenshot::screenshot_handler;
 use eyes::eyes_handler;
 
 /// Запускает сервер; возвращает занявший порт.
 /// `fixed_port: None` — порт всегда рандомизируется (ОС выдаёт свободный, правило пользователя 17.11.2026);
 /// `Some(p)` — строгий bind на p (явный запрос через env PORT), ошибка если занят.
-pub async fn run_server(dist: PathBuf, fixed_port: Option<u16>) -> Result<u16, String> {
+/// `window_activate_tx` — опциональный oneshot-отправитель для активации окна Tauri (показать/восстановить/сфокусировать).
+pub async fn run_server(
+    dist: PathBuf,
+    fixed_port: Option<u16>,
+    window_activate_tx: Option<tokio::sync::oneshot::Sender<()>>,
+) -> Result<u16, String> {
     if !dist.join("index.html").is_file() {
         let e = "не найдена папка dist/ рядом с сервером; сборка отсутствует".to_string();
         control::log_action("server", "start.fail", serde_json::json!({"error": e}));
@@ -435,6 +441,10 @@ pub async fn run_server(dist: PathBuf, fixed_port: Option<u16>) -> Result<u16, S
         .map_err(|e| format!("не удалось прочитать адрес: {e}"))?
         .port();
     debug_api::set_port(port);
+
+    if let Some(tx) = window_activate_tx {
+        debug_api::set_window_activate_tx(tx);
+    }
 
     let url = format!("http://localhost:{port}");
     // Первая запись журнала с момента запуска: видно старт и номер порта.

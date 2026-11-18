@@ -19,7 +19,7 @@ async fn main() {
     // PORT не задан — порт рандомизируется ядром; задан — строгий bind на него.
     let fixed_port: Option<u16> = env::var("PORT").ok().and_then(|p| p.parse().ok());
 
-    match run_server(dist, fixed_port).await {
+    match run_server(dist, fixed_port, None).await {
         Ok(_port) => {
             // Сервер живёт на spawned-задаче; держим процесс.
             std::future::pending::<()>().await;

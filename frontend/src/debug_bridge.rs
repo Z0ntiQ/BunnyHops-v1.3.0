@@ -214,6 +214,12 @@ fn handle_message(text: &str) {
     };
     match message.get("type").and_then(Value::as_str).unwrap_or("") {
         "hello" => spawn_local(post_snapshot()),
+        "action" => {
+            let action = message.get("action").and_then(Value::as_str).unwrap_or("");
+            if action == "elements.collect" {
+                spawn_local(push_elements_now());
+            }
+        }
         "ui_command" => {
             let path = message.get("path").and_then(Value::as_str).unwrap_or("");
             let value = message.get("value").cloned().unwrap_or(Value::Null);
