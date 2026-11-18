@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Full functional API matrix for bunny-hops-server on :3000."""
-import json, gzip, http.server, socketserver, threading, urllib.request, urllib.error, sys, time
+import json, gzip, http.server, socketserver, threading, urllib.request, urllib.error, sys, time, os
 
 ECHO_PORT = 8099
-BASE = "http://localhost:3000"
+BASE = os.environ.get("HOP_URL", "http://localhost:3000").rstrip("/")
 results = []
 
 def _enable_debug_api():
@@ -172,12 +172,17 @@ check("статика / отдаёт HTML", st == 200 and b"<html" in b.lower())
 st, hdr, b = call("GET", "/some/spa/route")
 check("SPA-fallback отдаёт index", st == 200 and b"<html" in b.lower())
 
-# ---------- 12. screenshot (маршрут выпилён 18.11.2026, веб-версии нет) ----------
-# /screenshot больше не маршрут: неизвестный путь отвечает SPA-fallback (HTML),
-# не PNG и не 502. Регрессией считается возвращение PNG/JSON-обработчика.
-st, hdr, b = call("GET", "/screenshot?match=localhost:3000", timeout=15)
-is_html = b[:14].lower().lstrip().startswith(b"<!doctype") or b[:6].lower() == b"<html"
-check("/screenshot мёртв (SPA-fallback, не PNG)", st == 200 and is_html and b[:8] != b"\x89PNG\r\n\x1a\n")
+# ---------- 12. screenshot: кадр окна приложения или чистая ошибка ----------
+# Маршрут снимает окно приложения через CDP. На Windows WebView2 слушает 9222
+# только когда флаг передан кодом (desktop/main.rs additional_browser_args) —
+# проверено 18.11.2026 на TB49: PNG 144 КБ, глазами сверен (Bunny Hops UI).
+# Без CDP-вкладки (headless) — 502 + JSON error. Прочее — регрессия.
+st, hdr, b = call("GET", "/screenshot?match=127.0.0.1", timeout=15)
+is_png = b[:8] == b"\x89PNG\r\n\x1a\n"
+is_clean_error = st == 502 and b'"error"' in b
+check("/screenshot: PNG окна приложения или чистый 502-error",
+      is_png or is_clean_error,
+      f"st={st} bytes={len(b)} kind={'PNG' if is_png else 'json-error' if is_clean_error else 'other'}")
 
 # ---------- report ----------
 srv.shutdown()

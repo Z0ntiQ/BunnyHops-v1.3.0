@@ -2,6 +2,8 @@
 // Один процесс: в setup поднимается то же ядро (bunny_hops_server::run_server) на отдельном
 // потоке со своим tokio-runtime, затем окно открывается на http://127.0.0.1:<занятый порт>.
 // Дистрибутив SPA: BUNNY_HOPS_DIST → ресурсы собранного приложения → ../frontend/dist (dev).
+// Релиз под Windows — оконная подсистема: консольное окно при запуске не нужно (правило пользователя 19.11.2026).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use bunny_hops_server::run_server;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -77,15 +79,25 @@ fn main() {
             };
 
             let url = format!("http://127.0.0.1:{port}");
-            let win = tauri::WebviewWindowBuilder::new(
+            let mut winb = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::External(url.parse().unwrap()),
             )
             .title(format!("Bunny Hops \u{2014} http://127.0.0.1:{port}")) // полный адрес в title-bar (правило пользователя 17.11.2026)
             .inner_size(1280.0, 800.0)
-            .min_inner_size(900.0, 600.0)
-            .build()?;
+            .min_inner_size(900.0, 600.0);
+            // CDP на 9222 для /screenshot: WebView2 слушает remote debugging только
+            // когда флаг передан кодом (env WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+            // до процесса не доходит — проверено 18.11.2026 на TB49).
+            // Аргументы заменяют дефолтные wry — дефолт повторяем и дополняем.
+            #[cfg(target_os = "windows")]
+            {
+                winb = winb.additional_browser_args(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222",
+                );
+            }
+            let win = winb.build()?;
 
             // Слушаем команды активации окна и применяем их на главном потоке Tauri.
             let window = win.clone();
