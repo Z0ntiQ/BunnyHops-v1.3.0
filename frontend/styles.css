@@ -1831,7 +1831,7 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 .actlog-line { white-space: pre; }
 
 /* ===== Mock (BunnyProx) — px-* классы ===== */
-.px-layout { display: grid; grid-template-columns: 220px 1fr 300px; height: 100%; }
+.px-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; height: 100%; }
 .px-nav-col { border-left: 1px solid var(--border); background: var(--bg); overflow-y: auto; }
 /* Правая колонка навигации по настройкам: тот же язык, что у сайдбара профилей. */
 .px-nav { padding: var(--space-4); height: 100%; overflow-y: auto; }
@@ -1896,6 +1896,9 @@ button.mv-active { font: inherit; font-size: var(--fs-caption); line-height: 1.6
 .px-pp.on:hover { color: var(--orange); background: rgba(255, 106, 0, .15); }
 .px-del { flex: none; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; visibility: hidden; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--fs-caption); line-height: 1; border-radius: var(--radius-tag); font-family: inherit; }
 .px-item:hover .px-del { visibility: visible; }
+/* В строках правил и вариантов крестик виден всегда, не только при наведении
+   (просьба пользователя 19.11.2026): в свёрнутом состоянии он единственный вход к удалению. */
+.mr-sum .px-del, .mv-sum .px-del { visibility: visible; }
 .px-del:hover { color: var(--red); background: rgba(249, 112, 102, .12); }
 .px-side .px-item.active { background: var(--accent-dim); color: var(--accent); }
 .px-side .px-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
@@ -1929,7 +1932,7 @@ button.mv-active { font: inherit; font-size: var(--fs-caption); line-height: 1.6
 .px-h-tools { display: flex; align-items: center; gap: 4px; }
 /* Имя в строке списка: тянется, ✵ прижат вправо. */
 .px-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.px-main { padding: var(--space-4); overflow-y: auto; }
+.px-main { padding: var(--space-4); overflow-y: auto; overflow-x: hidden; }
 .px-monitor { display: flex; flex-direction: column; min-height: 0; box-sizing: border-box; background: var(--bg-raised); padding: var(--space-4); }
 .px-btn { height: var(--control-h); padding: 0 var(--space-3); box-sizing: border-box; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: var(--radius-control); cursor: pointer; font-family: inherit; font-size: var(--fs-label); }
 .px-btn.primary { background: var(--accent); color: var(--bg); }
@@ -1979,4 +1982,93 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .kv-token {
   color: var(--orange);
   font-weight: 700;
+}
+
+/* ===== Пустое состояние вкладки Mock: схема «Mock → Traffic» =====
+   Адаптация макета пользователя mock-traffic-flow.html в токены темы
+   приложения (19.11.2026). Вертикальный таймлайн из четырёх шагов:
+   шаг 1 — --accent, шаги 2–3 — --blue, шаг 4 — --orange. Компактно:
+   горизонтального скролла нет (max-width, min-width:0 у колонок), по высоте
+   блок влезает во вьюпорт, контейнер с overflow:hidden. CTA — штатная
+   .px-btn primary. Схема рендерится только пока правил нет. */
+.px-empty-block { height: 100%; display: flex; flex-direction: column; }
+.px-flow {
+  min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+}
+.px-flow-steps {
+  list-style: none; margin: 0; padding: 0 0 0 46px; position: relative;
+  display: flex; flex-direction: column; gap: 10px; max-width: 540px; width: 100%;
+}
+.px-flow-steps::before {
+  content: ""; position: absolute; left: 13px; top: 10px; bottom: 10px; width: 2px;
+  border-radius: 2px; opacity: 0.35;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--blue) 55%, var(--orange) 88%, transparent 100%);
+}
+.px-flow-step {
+  --flow-ac: var(--accent);
+  --flow-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --flow-line: color-mix(in srgb, var(--accent) 38%, transparent);
+  position: relative;
+}
+.px-flow-step--blue {
+  --flow-ac: var(--blue);
+  --flow-soft: color-mix(in srgb, var(--blue) 12%, transparent);
+  --flow-line: color-mix(in srgb, var(--blue) 38%, transparent);
+}
+.px-flow-step--result {
+  --flow-ac: var(--orange);
+  --flow-soft: color-mix(in srgb, var(--orange) 12%, transparent);
+  --flow-line: color-mix(in srgb, var(--orange) 38%, transparent);
+}
+.px-flow-node {
+  position: absolute; left: -46px; top: 8px; width: 28px; height: 28px;
+  display: grid; place-items: center; border-radius: var(--radius-control);
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: 10.5px; font-weight: 700; color: var(--flow-ac);
+  background: var(--flow-soft); border: 1px solid var(--flow-line);
+}
+.px-flow-card {
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-container); padding: var(--space-3) var(--space-4);
+}
+.px-flow-step--result .px-flow-card { border-color: var(--flow-line); }
+.px-flow-ico {
+  flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: var(--radius-control); color: var(--flow-ac);
+  background: var(--flow-soft); border: 1px solid var(--flow-line);
+}
+.px-flow-ico svg { width: 16px; height: 16px; }
+.px-flow-body { flex: 1; min-width: 0; }
+.px-flow-label {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--flow-ac);
+}
+.px-flow-label::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.85; }
+.px-flow-step--result .px-flow-label::before { animation: px-flow-pulse 2s ease-in-out infinite; }
+@keyframes px-flow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--orange) 55%, transparent); }
+  50% { box-shadow: 0 0 0 5px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .px-flow-step--result .px-flow-label::before { animation: none; }
+}
+.px-flow-h { font-size: var(--fs-body); font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-bottom: 2px; }
+.px-flow-p { font-size: var(--fs-caption); line-height: 1.45; color: var(--text-dim); }
+.px-flow-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.px-flow-tags span {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: 10.5px; color: var(--text);
+  background: var(--flow-soft); border: 1px solid var(--flow-line);
+  padding: 3px 9px; border-radius: var(--radius-pill);
+}
+.px-flow-cta-row { display: flex; justify-content: center; margin-top: var(--space-2); }
+@media (max-height: 760px) {
+  .px-flow-steps { gap: 6px; }
+  .px-flow-card { padding: var(--space-2) var(--space-3); }
+  .px-flow-ico { width: 26px; height: 26px; }
 }

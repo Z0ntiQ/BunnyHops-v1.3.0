@@ -132,6 +132,98 @@ async fn fetch_json_post(url: &str, body: &Value) -> Result<Value, String> {
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
 
+// Пустое состояние mock-вкладки: адаптация схемы «Mock → Traffic»
+// (макет пользователя mock-traffic-flow.html, 19.11.2026) в токены темы
+// приложения. Компактная вертикальная схема из четырёх шагов: шаг 1 — цвет
+// --accent (мок поднят), шаги 2–3 — --blue (действие и обмен), шаг 4 —
+// --orange (доказательство в Traffic). CTA открывает модалку нового правила
+// тем же колбэком, что «+» в шапке. Схема живёт, только пока правил нет:
+// после сохранения первого рендерится список.
+#[component]
+fn EmptyFlow(on_add: Callback<()>) -> impl IntoView {
+    view! {
+        <div class="px-flow" role="img" aria-label="Как это будет работать: мок-профиль запущен, кнопка в тестируемой системе, HTTP-обмен по правилу, доказательство на вкладке Traffic">
+            <ol class="px-flow-steps">
+                <li class="px-flow-step">
+                    <span class="px-flow-node">"01"</span>
+                    <div class="px-flow-card">
+                        <span class="px-flow-ico">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="2.5" y="3" width="19" height="7.5" rx="2"/>
+                                <rect x="2.5" y="13.5" width="19" height="7.5" rx="2"/>
+                                <line x1="7" y1="6.75" x2="7.01" y2="6.75" stroke-width="2.4"/>
+                                <line x1="7" y1="17.25" x2="7.01" y2="17.25" stroke-width="2.4"/>
+                            </svg>
+                        </span>
+                        <div class="px-flow-body">
+                            <div class="px-flow-label">"Шаг 1 · Условие"</div>
+                            <div class="px-flow-h">"Мок-профиль запущен"</div>
+                            <div class="px-flow-p">"Слушает порт — для тестируемой системы это обычная внешняя служба"</div>
+                        </div>
+                    </div>
+                </li>
+                <li class="px-flow-step px-flow-step--blue">
+                    <span class="px-flow-node">"02"</span>
+                    <div class="px-flow-card">
+                        <span class="px-flow-ico">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/>
+                            </svg>
+                        </span>
+                        <div class="px-flow-body">
+                            <div class="px-flow-label">"Шаг 2 · Действие"</div>
+                            <div class="px-flow-h">"Кнопка в тестируемой системе"</div>
+                            <div class="px-flow-p">"Тест запускает действие, которое обращается к внешнему API"</div>
+                        </div>
+                    </div>
+                </li>
+                <li class="px-flow-step px-flow-step--blue">
+                    <span class="px-flow-node">"03"</span>
+                    <div class="px-flow-card">
+                        <span class="px-flow-ico">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="m16 3 4 4-4 4"/>
+                                <path d="M20 7H4"/>
+                                <path d="m8 21-4-4 4-4"/>
+                                <path d="M4 17h16"/>
+                            </svg>
+                        </span>
+                        <div class="px-flow-body">
+                            <div class="px-flow-label">"Шаг 3 · Обмен"</div>
+                            <div class="px-flow-h">"HTTP-вызов → вариант ответа"</div>
+                            <div class="px-flow-p">"Мок матчит путь и метод и отвечает нужным JSON из правила профиля"</div>
+                        </div>
+                    </div>
+                </li>
+                <li class="px-flow-step px-flow-step--result">
+                    <span class="px-flow-node">"04"</span>
+                    <div class="px-flow-card">
+                        <span class="px-flow-ico">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M3.5 6h11"/>
+                                <path d="M3.5 12h7"/>
+                                <path d="M3.5 18h6"/>
+                                <circle cx="16" cy="14.5" r="3.2"/>
+                                <path d="m21.5 20-2.6-2.6"/>
+                            </svg>
+                        </span>
+                        <div class="px-flow-body">
+                            <div class="px-flow-label">"Шаг 4 · Результат"</div>
+                            <div class="px-flow-h">"Вкладка Traffic"</div>
+                            <div class="px-flow-tags">
+                                <span>"Метод"</span><span>"Путь"</span><span>"Совпавшее правило"</span><span>"Отданный ответ"</span>
+                            </div>
+                        </div>
+                    </div>
+                </li>
+            </ol>
+            <div class="px-flow-cta-row">
+                <button class="px-btn primary" data-bh="mock.add_rule" on:click=move |_| { on_add.run(()); }>"Добавить правило"</button>
+            </div>
+        </div>
+    }
+}
+
 #[component]
 pub fn ProxyView() -> impl IntoView {
     let profiles = RwSignal::new(Vec::<Value>::new());
@@ -267,6 +359,10 @@ pub fn ProxyView() -> impl IntoView {
     };
 
     let del_profile_confirm = RwSignal::new(None::<String>);
+    // Подтверждение удаления правила / варианта (просьба пользователя 19.11.2026):
+    // крестик в строке открывает модалку, удаление — только после «Удалить».
+    let del_rule_confirm = RwSignal::new(None::<usize>);
+    let del_variant_confirm = RwSignal::new(None::<(usize, usize)>);
 
     let delete_profile = move |name: String| {
         spawn_local(async move {
@@ -781,10 +877,9 @@ pub fn ProxyView() -> impl IntoView {
         view! {
             <div class="px-block">
                 <div class="px-h-row">
-                    // В шапке только иконка «+»: слово убрано по просьбе
-                    // пользователя 17.11.2026, смысл подсказывает тултип при наведении.
-                    <button data-bh="mock.add_rule" class="px-mini" data-tip="Добавить правило" aria-label="Добавить правило"
-                        on:click=move |_| { ar_h.run(()); }><IconPlus /></button>
+                    // В шапке — зелёная кнопка «Добавить правило»: плоская «+»
+                    // убрана по просьбе пользователя 19.11.2026, тот же обработчик.
+                    <button data-bh="mock.add_rule" class="px-btn primary" on:click=move |_| { ar_h.run(()); }>"Добавить правило"</button>
                 </div>
                 <div class="mrules">
                     <For
@@ -837,6 +932,12 @@ pub fn ProxyView() -> impl IntoView {
                                             }
                                             view! { <span class="mnav-dot" title="Правило выключено или вариант с битыми данными"/> }.into_any()
                                         }}</span>
+                                        <button data-bh=format!("rule.delete.{ri}") class="px-del" title="Удалить правило" aria-label="Удалить правило"
+                                            on:click=move |e| {
+                                                e.prevent_default();
+                                                e.stop_propagation();
+                                                del_rule_confirm.set(Some(ri));
+                                            }>"✕"</button>
                                     </summary>
                                     <div class="mr-body">
                                         <div class="px-grid2">
@@ -913,6 +1014,7 @@ pub fn ProxyView() -> impl IntoView {
                                                     let sr3 = select_rule;
                                                     let sv2 = select_variant;
                                                     let dv2 = delete_variant;
+                                                    let dvc = del_variant_confirm;
                                                     view! {
                                                         <details data-bh=format!("variant.row.{ri}.{vi}") class="mvar"
                                                             open=move || selected_rule_idx.get() == Some(ri) && selected_variant_idx.get() == Some(vi)>
@@ -970,6 +1072,12 @@ pub fn ProxyView() -> impl IntoView {
                                                                         }.into_any()
                                                                     }}
                                                                 </span>
+                                                                <button data-bh=format!("variant.delete.{ri}.{vi}") class="px-del" title="Удалить вариант" aria-label="Удалить вариант"
+                                                                    on:click=move |e| {
+                                                                        e.prevent_default();
+                                                                        e.stop_propagation();
+                                                                        dvc.set(Some((ri, vi)));
+                                                                    }>"✕"</button>
                                                             </summary>
                                                             <div class="mv-body">
                                                                 <div class="px-ctl-row">
@@ -1204,6 +1312,77 @@ pub fn ProxyView() -> impl IntoView {
                         </div>
                     </div>
                 </Show>
+                // Подтверждение удаления правила: крестик в строке списка правил
+                // (просьба пользователя 19.11.2026), тот же рисунок, что у профиля.
+                <Show when=move || del_rule_confirm.get().is_some()>
+                    <div class="modal-overlay"
+                        on:click=move |ev| {
+                            let on_overlay = ev
+                                .target()
+                                .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
+                                .map(|t| t.class_list().contains("modal-overlay"))
+                                .unwrap_or(false);
+                            if on_overlay {
+                                del_rule_confirm.set(None);
+                            }
+                        }>
+                        <div class="modal">
+                            <div class="modal-title">{move || {
+                                let Some(ri) = del_rule_confirm.get() else { return String::new() };
+                                let path = rfield(ri, "path").and_then(|x| x.as_str().map(String::from)).unwrap_or_default();
+                                let method = rfield(ri, "method").and_then(|x| x.as_str().map(String::from)).unwrap_or_else(|| "*".to_string());
+                                format!("Удалить правило {method} {path}?")
+                            }}</div>
+                            <div class="modal-hint">"Вместе с правилом удалятся все его варианты ответа."</div>
+                            <div class="modal-actions">
+                                <button data-bh="modal.del_rule_confirm" class="modal-save danger" on:click=move |_| {
+                                    if let Some(ri) = del_rule_confirm.get() {
+                                        delete_rule(ri);
+                                    }
+                                    del_rule_confirm.set(None);
+                                }>"Удалить"</button>
+                                <button data-bh="modal.del_rule_cancel" class="modal-cancel" on:click=move |_| del_rule_confirm.set(None)>"Отмена"</button>
+                            </div>
+                        </div>
+                    </div>
+                </Show>
+                // Подтверждение удаления варианта ответа: крестик в строке списка
+                // вариантов (просьба пользователя 19.11.2026).
+                <Show when=move || del_variant_confirm.get().is_some()>
+                    <div class="modal-overlay"
+                        on:click=move |ev| {
+                            let on_overlay = ev
+                                .target()
+                                .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
+                                .map(|t| t.class_list().contains("modal-overlay"))
+                                .unwrap_or(false);
+                            if on_overlay {
+                                del_variant_confirm.set(None);
+                            }
+                        }>
+                        <div class="modal">
+                            <div class="modal-title">{move || {
+                                let Some((ri, vi)) = del_variant_confirm.get() else { return String::new() };
+                                let lab = vfield(ri, vi, "label").and_then(|x| x.as_str().map(String::from))
+                                    .filter(|s| !s.is_empty())
+                                    .unwrap_or_else(|| "вариант ответа".to_string());
+                                format!("Удалить вариант «{lab}»?")
+                            }}</div>
+                            <div class="modal-hint">"Вариант будет удалён из правила без возможности отменить."</div>
+                            <div class="modal-actions">
+                                <button data-bh="modal.del_variant_confirm" class="modal-save danger" on:click=move |_| {
+                                    if let Some((ri, _vi)) = del_variant_confirm.get() {
+                                        // delete_variant берёт индекс варианта из выбранного правила.
+                                        selected_rule_idx.set(Some(ri));
+                                        delete_variant(_vi);
+                                    }
+                                    del_variant_confirm.set(None);
+                                }>"Удалить"</button>
+                                <button data-bh="modal.del_variant_cancel" class="modal-cancel" on:click=move |_| del_variant_confirm.set(None)>"Отмена"</button>
+                            </div>
+                        </div>
+                    </div>
+                </Show>
                 // Модалка нового правила: название обязательно, тип совпадения и
                 // код ответа как в редакторе правил (просьба пользователя 17.11.2026).
                 <Show when=move || rule_name_open.get()>
@@ -1271,7 +1450,15 @@ pub fn ProxyView() -> impl IntoView {
             </div>
 
             <div class="px-main">
-                <Show when=move || selected_profile.get().is_some() fallback=move || { view! { <div class="px-empty">Выберите или создайте профиль слева</div> } }>
+                <Show when=move || !rules.get().is_empty() fallback=move || { view! {
+                    // Пустое состояние: вместо панели правил — инфографика
+                    // «как это работает»; кнопка добавления — одна, внутри
+                    // схемы (отдельная «+» в шапке не нужна). Как только
+                    // появляется первое правило, картинка уступает место списку.
+                    <div class="px-block px-empty-block">
+                        <EmptyFlow on_add=add_rule_cb.clone()/>
+                    </div>
+                } }>
                     // Центральная колонка: настройки соединения или список
                     // правил-спойлеров; раздел правил открыт по умолчанию.
                     {move || match nav_sel.get().map(|s| s.kind) {
