@@ -2,10 +2,10 @@
 //!
 //! Методы: `system.get_state`, `ui.inspect`, `ui.click`, `ui.type`, `ui.wait`, `app.execute`.
 //! Коды ошибок: -32601 (нет метода), -32602 (параметры), -32603 (внутренняя, data.stacktrace).
-//! Авторизация: `Authorization: Bearer <token>` обязателен на `/rpc`.
+//! Авторизация: `Authorization: Bearer *** обязателен на `/rpc`.
 
 use axum::body::to_bytes;
-use axum::extract::{Request, State};
+use axum::extract::{Extension, Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::post;
@@ -19,6 +19,56 @@ use crate::AppState;
 
 const MAX_BODY: usize = 10 * 1024 * 1024;
 
+/// Путь lock-файла: ~/.config/bunny-hops/rpc.json. Внешний MCP-клиент читает
+/// его перед каждым вызовом и проверяет живость pid (os.kill(pid, 0)).
+pub fn lock_file_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".config/bunny-hops/rpc.json")
+}
+
+/// Случайный Bearer-токен: 16 байт из /dev/urandom в hex; fallback — время+pid.
+pub fn generate_token() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    match std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes).map(|_| bytes))
+    {
+        Ok(b) => b.iter().map(|x| format!("{x:02x}")).collect(),
+        Err(_) => {
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0)
+                ^ (std::process::id() as u64) << 32;
+            format!("{t:016x}{t:016x}")
+        }
+    }
+}
+
+/// Публикует порт+токен+pid в lock-файл; ошибка не фатальна для сервера.
+pub fn write_lock_file(port: u16, token: &str) -> Result<(), String> {
+    let path = lock_file_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("не создана папка {}: {e}", dir.display()))?;
+    }
+    let body = json!({ "port": port, "token": token, "pid": std::process::id() });
+    std::fs::write(&path, body.to_string())
+        .map_err(|e| format!("не записан {}: {e}", path.display()))?;
+    // Токен в файле = секрет: режим 0600, только владелец читает.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Убирает lock-файл при остановке; отсутствие файла — не ошибка.
+pub fn remove_lock_file() {
+    let _ = std::fs::remove_file(lock_file_path());
+}
+
 /// Входящий JSON-RPC 2.0 запрос.
 #[derive(Deserialize)]
 struct JsonRpcRequest {
@@ -28,14 +78,6 @@ struct JsonRpcRequest {
     method: String,
     #[serde(default)]
     params: Option<Value>,
-}
-
-/// JSON-RPC 2.0 ответ (успех).
-#[derive(Serialize)]
-struct JsonRpcSuccess {
-    jsonrpc: String,
-    id: Value,
-    result: Value,
 }
 
 /// JSON-RPC 2.0 ответ (ошибка).
@@ -54,29 +96,27 @@ struct JsonRpcErrorObject {
     data: Option<Value>,
 }
 
-/// Состояние RPC-роутера: токен + ссылка на AppState (для вызовов функций).
-#[derive(Clone)]
-pub struct RpcState {
-    pub token: String,
-    pub app_state: AppState,
-}
-
-/// Создать RPC-роутер.
-pub fn rpc_router(token: String, app_state: AppState) -> Router {
-    let state = RpcState { token, app_state };
-    Router::new()
+/// Создать RPC-роутер. Состояние AppState применяется главным роутером
+/// через .with_state(); в тестах — через .with_state(test_app_state()).
+/// Токен передаётся через Extension layer.
+pub fn rpc_router(token: String) -> Router<AppState> {
+    Router::<AppState>::new()
         .route("/rpc", post(rpc_handler))
-        .with_state(state)
+        .layer(Extension(token))
 }
 
 /// Обработчик POST /rpc.
-async fn rpc_handler(State(state): State<RpcState>, req: Request) -> Response {
+async fn rpc_handler(
+    Extension(token): Extension<String>,
+    State(app_state): State<AppState>,
+    req: Request,
+) -> Response {
     // 1. Проверка Bearer-токена
     let auth = req.headers().get("authorization");
     let token_ok = auth
         .and_then(|h| h.to_str().ok())
         .map(|h| h.strip_prefix("Bearer ").unwrap_or(h))
-        .map(|t| t == state.token)
+        .map(|t| t == token)
         .unwrap_or(false);
 
     if !token_ok {
@@ -142,12 +182,12 @@ async fn rpc_handler(State(state): State<RpcState>, req: Request) -> Response {
 
     // 5. Вызов метода через match
     let result = match request.method.as_str() {
-        "system.get_state" => handle_system_get_state(&state, request.params).await,
-        "ui.inspect" => handle_ui_inspect(&state, request.params).await,
-        "ui.click" => handle_ui_click(&state, request.params).await,
-        "ui.type" => handle_ui_type(&state, request.params).await,
-        "ui.wait" => handle_ui_wait(&state, request.params).await,
-        "app.execute" => handle_app_execute(&state, request.params).await,
+        "system.get_state" => handle_system_get_state(&app_state, request.params).await,
+        "ui.inspect" => handle_ui_inspect(&app_state, request.params).await,
+        "ui.click" => handle_ui_click(&app_state, request.params).await,
+        "ui.type" => handle_ui_type(&app_state, request.params).await,
+        "ui.wait" => handle_ui_wait(&app_state, request.params).await,
+        "app.execute" => handle_app_execute(&app_state, request.params).await,
         _ => {
             return json_rpc_error_response(
                 Some(id),
@@ -162,16 +202,14 @@ async fn rpc_handler(State(state): State<RpcState>, req: Request) -> Response {
     // 6. Формирование ответа
     match result {
         Ok(result) => {
-            let resp = JsonRpcSuccess {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result,
-            };
-            control::json_response(StatusCode::OK, &serde_json::to_value(resp).unwrap())
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": result
+            });
+            control::json_response(StatusCode::OK, &resp)
         }
-        Err((code, message, data)) => {
-            json_rpc_error_response(Some(id), code, &message, data, StatusCode::OK)
-        }
+        Err((code, message, data)) => json_rpc_error_response(Some(id), code, &message, data, StatusCode::OK),
     }
 }
 
@@ -198,13 +236,13 @@ fn json_rpc_error_response(
 // ===== Обработчики методов =====
 
 /// system.get_state — возвращает полное состояние приложения.
-async fn handle_system_get_state(_state: &RpcState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_system_get_state(_state: &AppState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
     // Используем существующую функцию debug_api::full_state()
     Ok(debug_api::full_state())
 }
 
 /// ui.inspect — возвращает BROOP-карту (как GET /debug/broop).
-async fn handle_ui_inspect(_state: &RpcState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_inspect(_state: &AppState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
     let doc = debug_api::broop_doc();
     let catalog: Vec<Value> = doc
         .get("objects")
@@ -254,7 +292,7 @@ async fn handle_ui_inspect(_state: &RpcState, _params: Option<Value>) -> Result<
 }
 
 /// ui.click — клик по элементу BROOP по id.
-async fn handle_ui_click(_state: &RpcState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_click(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
     let id = params
         .as_ref()
         .and_then(|p| p.get("id"))
@@ -317,7 +355,7 @@ async fn handle_ui_click(_state: &RpcState, params: Option<Value>) -> Result<Val
 }
 
 /// ui.type — установка текста в элемент.
-async fn handle_ui_type(_state: &RpcState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_type(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
     let id = params
         .as_ref()
         .and_then(|p| p.get("id"))
@@ -346,17 +384,23 @@ async fn handle_ui_type(_state: &RpcState, params: Option<Value>) -> Result<Valu
     Ok(result)
 }
 
-/// ui.wait — ожидание условия (заглушка, возвращает -32603 not implemented).
-async fn handle_ui_wait(_state: &RpcState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
-    Err((
-        -32603,
-        "Method not implemented".to_string(),
-        Some(json!({"stacktrace": "not implemented"})),
-    ))
+/// ui.wait — ожидание условия через общее ядро debug_api::wait_for_predicate.
+async fn handle_ui_wait(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+    let predicate = params
+        .as_ref()
+        .and_then(|p| p.get("predicate"))
+        .cloned()
+        .ok_or((-32602, "Missing required parameter: predicate".to_string(), None))?;
+    let timeout_ms = params
+        .as_ref()
+        .and_then(|p| p.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(5000);
+    Ok(debug_api::wait_for_predicate(&predicate, timeout_ms).await)
 }
 
 /// app.execute — выполнение действия из реестра debug_api (ui.set, ui.reset, ui.click, element.click, element.set, eval, traffic.clear, logs.clear).
-async fn handle_app_execute(_state: &RpcState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_app_execute(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
     let action = params
         .as_ref()
         .and_then(|p| p.get("action"))
@@ -421,7 +465,7 @@ mod tests {
     }
 
     fn test_rpc_router(token: &str) -> Router {
-        rpc_router(token.to_string(), test_app_state())
+        rpc_router(token.to_string()).with_state(test_app_state())
     }
 
     async fn rpc_call(
@@ -498,5 +542,27 @@ mod tests {
         assert!(body["result"].is_object());
         assert!(body["result"]["app"].is_object());
         assert_eq!(body["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn rpc_ui_wait_returns_result() {
+        // Предикат element/absent матчится мгновенно: элемента нет в живом сторе.
+        let router = test_rpc_router("secret123");
+        let params = json!({
+            "predicate": {"kind": "element", "id": "no.such.element", "state": "absent"},
+            "timeout_ms": 500,
+        });
+        let (status, body) = rpc_call(&router, Some("secret123"), "ui.wait", Some(params), Some(json!(1))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["result"]["ok"], true);
+        assert_eq!(body["result"]["matched"]["state"], "absent");
+    }
+
+    #[tokio::test]
+    async fn rpc_ui_wait_requires_predicate() {
+        let router = test_rpc_router("secret123");
+        let (status, body) = rpc_call(&router, Some("secret123"), "ui.wait", Some(json!({})), Some(json!(1))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["error"]["code"], -32602);
     }
 }

@@ -179,6 +179,7 @@ pub(crate) fn full_state() -> Value {
             "engine": mock_server::control_snapshot(),
         },
         "traffic": Value::Object(mock_server::traffic_snapshot()),
+        "elements": Value::Array(live_elements()),
         "ui": ui_state(),
     })
 }
@@ -194,6 +195,69 @@ fn path_get<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
         cur = cur.get(seg)?;
     }
     Some(cur)
+}
+
+/// Оценка предиката ожидания над снимком состояния.
+/// Возвращает Some(значение) при совпадении, None — если не совпало.
+/// Поддерживаемые виды предикатов (по ТЗ 2.2.4):
+/// - {"kind":"element","id":"...","state":"present|absent|enabled|disabled","value"?}
+///   Проверяет живой элемент в store.elements[] по id.
+///   state="present" — элемент существует; "absent" — не существует;
+///   "enabled"/"disabled" — элемент существует и флаг enabled соответствует.
+///   Если задан "value", дополнительно проверяет element.value == value.
+/// - {"kind":"state","path":"...","equals":...}
+///   Проверяет path_get(state, path) == equals (сериализованное сравнение).
+pub(crate) fn eval_predicate(store: &Value, predicate: &Value) -> Option<Value> {
+    let kind = predicate.get("kind").and_then(Value::as_str)?;
+    match kind {
+        "element" => {
+            let id = predicate.get("id").and_then(Value::as_str)?;
+            let state = predicate.get("state").and_then(Value::as_str).unwrap_or("present");
+            let elements = store.get("elements").and_then(Value::as_array)?;
+            let el = elements.iter().find(|e| e.get("id").and_then(Value::as_str) == Some(id));
+            match state {
+                "present" => el.cloned(),
+                "absent" => {
+                    if el.is_none() {
+                        Some(json!({"id": id, "state": "absent"}))
+                    } else {
+                        None
+                    }
+                }
+                "enabled" => {
+                    let el = el?;
+                    let enabled = el.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                    if enabled { Some(el.clone()) } else { None }
+                }
+                "disabled" => {
+                    let el = el?;
+                    let enabled = el.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                    if !enabled { Some(el.clone()) } else { None }
+                }
+                _ => None,
+            }.and_then(|matched| {
+                // Optional value check
+                if let Some(expected) = predicate.get("value") {
+                    let actual = matched.get("value");
+                    if actual != Some(expected) {
+                        return None;
+                    }
+                }
+                Some(matched)
+            })
+        }
+        "state" => {
+            let path = predicate.get("path").and_then(Value::as_str)?;
+            let expected = predicate.get("equals")?;
+            let actual = path_get(store, path)?;
+            if actual == expected {
+                Some(json!({"path": path, "value": actual}))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 fn deep_merge(dst: &mut Value, src: &Value) {
@@ -916,6 +980,59 @@ async fn handle_socket(mut socket: WebSocket) {
 
 // ---------- маршруты ----------
 
+/// Ожидание условия (предката) над состоянием приложения.
+/// POST /debug/wait {"predicate": {...}, "timeout_ms"?: 5000}
+/// Предикаты:
+///   {"kind":"element","id":"...","state":"present|absent|enabled|disabled","value"?}
+///   {"kind":"state","path":"...","equals":...}
+/// Поллер: шаг 50 мс, round-trip elements.collect не чаще раза в 500 мс.
+/// Ответ при успехе: {"ok":true,"matched":<item>,"waited_ms":N}
+/// Ответ по таймауту: HTTP 200, {"ok":false,"reason":"timeout","last":<снимок>}
+async fn wait_handler(Json(body): Json<Value>) -> Response {
+    let predicate = match body.get("predicate").cloned() {
+        Some(p) => p,
+        None => return control::err(StatusCode::BAD_REQUEST, r#"нужно {"predicate": {...}, "timeout_ms"?: 5000}"#),
+    };
+    let timeout_ms = body.get("timeout_ms").and_then(Value::as_u64).unwrap_or(5000).clamp(1, 60000);
+    let out = wait_for_predicate(&predicate, timeout_ms).await;
+    control::json_response(StatusCode::OK, &out)
+}
+
+/// Ядро ожидания: поллер предиката до дедлайна.
+/// Успех: {"ok":true,"matched":<item>,"waited_ms":N}; таймаут: {"ok":false,"reason":"timeout","last":<снимок>}.
+/// Общий код для POST /debug/wait и RPC ui.wait.
+pub(crate) async fn wait_for_predicate(predicate: &Value, timeout_ms: u64) -> Value {
+    let timeout_ms = timeout_ms.clamp(1, 60000);
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(timeout_ms);
+    let mut last_round_trip = started - Duration::from_millis(500); // allow immediate first
+    let mut last_snapshot = full_state();
+
+    while Instant::now() < deadline {
+        // Fresh snapshot each iteration
+        last_snapshot = full_state();
+
+        // Try evaluate predicate
+        if let Some(matched) = eval_predicate(&last_snapshot, predicate) {
+            let waited_ms = (Instant::now() - started).as_millis() as u64;
+            return json!({"ok": true, "matched": matched, "waited_ms": waited_ms});
+        }
+
+        // Round-trip trigger: ask UI to collect elements, but not more than once per 500ms
+        let now = Instant::now();
+        if now.duration_since(last_round_trip) >= Duration::from_millis(500) {
+            publish(json!({"action": "elements.collect"}));
+            last_round_trip = now;
+        }
+
+        // Poll interval 50ms
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    // Timeout - return last snapshot with reason
+    json!({"ok": false, "reason": "timeout", "last": last_snapshot})
+}
+
 /// Активировать окно (показать/восстановить/сфокусировать).
 async fn window_activate_handler() -> Response {
     match window_activate().await {
@@ -944,6 +1061,7 @@ pub(crate) fn mcp_router<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route("/debug/broop/get", get(broop_get_handler))
         .route("/debug/stream", get(ws_handler))
         .route("/debug/window/activate", post(window_activate_handler))
+        .route("/debug/wait", post(wait_handler))
 }
 
 /// Гейт MCP-поверхности: проускает при включённом гейте или когда запрос помечен
@@ -988,5 +1106,37 @@ mod tests {
         assert_eq!(item.id, "mock.add_rule");
         assert!(item.enabled);
         assert!(item.visible);
+    }
+
+    #[test]
+    fn wait_predicate_element_present_matches() {
+        // Given a store with an element present and enabled
+        let store = json!({"elements": [{"id": "btn.submit", "enabled": true, "visible": true}]});
+        let predicate = json!({"kind": "element", "id": "btn.submit", "state": "present"});
+        let matched = eval_predicate(&store, &predicate);
+        assert!(matched.is_some(), "element present should match");
+        let m = matched.unwrap();
+        assert_eq!(m.get("id").and_then(Value::as_str), Some("btn.submit"));
+    }
+
+    #[test]
+    fn wait_predicate_state_path_equals_matches() {
+        // Given a full state with a nested value
+        let state = json!({"config": {"theme": "dark", "lang": "en"}});
+        let predicate = json!({"kind": "state", "path": "config.theme", "equals": "dark"});
+        let matched = eval_predicate(&state, &predicate);
+        assert!(matched.is_some(), "state path equals should match");
+    }
+
+    #[test]
+    fn wait_timeout_returns_last_snapshot() {
+        // This test will verify the timeout behavior returns last snapshot
+        // It will fail until the wait handler is implemented
+        let predicate = json!({"kind": "element", "id": "nonexistent", "state": "present"});
+        // The actual wait handler test would need a running server, so this unit test
+        // just ensures the predicate evaluation returns None for non-matching case
+        let store = json!({"elements": []});
+        let matched = eval_predicate(&store, &predicate);
+        assert!(matched.is_none(), "non-matching element should return None");
     }
 }

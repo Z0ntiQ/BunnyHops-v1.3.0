@@ -165,7 +165,7 @@ fn log_api_call(
     }
 }
 
-async fn api_rules_handler(
+pub async fn api_rules_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Response {
     let log = state.api_log.lock().map(|l| l.clone()).unwrap_or_default();
@@ -392,10 +392,15 @@ pub async fn run_server(
 
     control::STARTED.set(std::time::Instant::now()).ok();
     debug_api::init_from_env();
+    // /rpc живёт всегда (внешний MCP-клиент), в отличие от гейта /debug/*.
+    // Токен генерируется на старте и публикуется в lock-файл после bind.
+    let api_log = Arc::new(Mutex::new(Vec::new()));
+    let rpc_token = rpc_api::generate_token();
     let app = Router::new()
         .route("/screenshot", any(screenshot_handler))
         .merge(control::control_router())
         .merge(debug_api::contract_router())
+        .merge(rpc_api::rpc_router(rpc_token.clone()))
         .merge(
             Router::new()
                 .route("/debug/proxy", any(proxy_handler))
@@ -412,7 +417,7 @@ pub async fn run_server(
         })
         .with_state(AppState {
             client,
-            api_log: Arc::new(Mutex::new(Vec::new())),
+            api_log,
         })
         // Транспортный журнал: ни один запрос к API не проходит незамеченным.
         .layer(axum::middleware::from_fn(
@@ -441,6 +446,11 @@ pub async fn run_server(
         .map_err(|e| format!("не удалось прочитать адрес: {e}"))?
         .port();
     debug_api::set_port(port);
+    // Lock-файл для внешнего MCP-клиента: порт+токен+pid. Ошибка не валит сервер;
+    // при аварийном выходе файл остаётся — клиент проверяет живость pid.
+    if let Err(e) = rpc_api::write_lock_file(port, &rpc_token) {
+        control::log_action("server", "rpc.lock.fail", serde_json::json!({ "error": e }));
+    }
 
     if let Some(tx) = window_activate_tx {
         debug_api::set_window_activate_tx(tx);
