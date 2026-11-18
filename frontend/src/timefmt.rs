@@ -19,20 +19,11 @@ pub fn ts_at(ts: u64) -> String {
     format!("{:02}:{:02}:{:02}", d.get_hours(), d.get_minutes(), d.get_seconds())
 }
 
-/// Единый логер: событие UI уходит в серверный журнал (POST /api/log).
+/// Единый логер: событие UI уходит в серверный журнал (POST /debug/log).
 pub async fn post_log(msg: &str) {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return,
-    };
-    let init = web_sys::RequestInit::new();
-    init.set_method("POST");
-    init.set_body(&JsValue::from_str(
-        &serde_json::json!({"msg": msg}).to_string(),
-    ));
-    let Ok(req) = web_sys::Request::new_with_str_and_init("/api/log", &init) else {
+    let body = serde_json::json!({"msg": msg}).to_string();
+    let Ok(promise) = crate::util::ui_fetch("/debug/log", Some("POST"), Some(&body)) else {
         return;
     };
-    let promise = win.fetch_with_request(&req);
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }

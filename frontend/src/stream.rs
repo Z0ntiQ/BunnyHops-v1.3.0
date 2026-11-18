@@ -64,7 +64,7 @@ pub async fn do_stream(
             h.push((k.clone(), v.clone()));
         }
     }
-    let proxy_url = format!("/proxy?url={}", crate::logic::js_encode_uri_component(target));
+    let proxy_url = format!("/debug/proxy?url={}", crate::logic::js_encode_uri_component(target));
     let init = RequestInit::new();
     init.set_method(method);
     let hobj = js_sys::Object::new();

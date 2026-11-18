@@ -219,7 +219,7 @@ pub fn KvEditor(
         <div class="kv-list" class:bulk-open=move || bulk_open.get()>
             <div class="kv-toolbar">
                 <div class="morph" class:morph-open=move || bulk_open.get()>
-                    <button
+                    <button data-bh="kv.morph_toggle"
                         class="morph-pill"
                         aria-haspopup="dialog"
                         aria-expanded=move || bulk_open.get().to_string()
@@ -244,7 +244,7 @@ pub fn KvEditor(
                                 </svg>
                                 "Bulk edit"
                             </div>
-                            <textarea
+                            <textarea data-bh="kv.bulk_text"
                                 class="kv-bulk-text"
                                 node_ref=bulk_ta
                                 prop:value=bulk_text
@@ -269,13 +269,13 @@ pub fn KvEditor(
                             />
                             <div class="morph-foot">
                                 <span class="morph-hint">{"применяется сразу · ⌘↵ или Esc — закрыть"}</span>
-                                <button class="morph-done" on:click=close_bulk>"Готово"</button>
+                                <button data-bh="kv.morph_done" class="morph-done" on:click=close_bulk>"Готово"</button>
                             </div>
                         </div>
                     </Show>
                 </div>
                 <div class="kv-toolbar-right">
-                    <button class="kv-add" on:click=add_row>
+                    <button data-bh="kv.add_row" class="kv-add" on:click=add_row>
                         "+ Add new"
                     </button>
                 </div>
@@ -319,7 +319,7 @@ pub fn KvEditor(
                     });
                     view! {
                         <div class="kv-row">
-                            <input
+                            <input data-bh=format!("kv.row_check.{i}")
                                 node_ref=chk_ref
                                 type="checkbox"
                                 class="kv-check"
@@ -333,7 +333,7 @@ pub fn KvEditor(
                                 }
                                 title="Включить/выключить"
                             />
-                            <input
+                            <input data-bh=format!("kv.row_key.{i}")
                                 node_ref=key_ref
                                 class="kv-input"
                                 prop:value=row.key
@@ -348,7 +348,7 @@ pub fn KvEditor(
                                     set_rows.run(rs);
                                 }
                             />
-                            <input
+                            <input data-bh=format!("kv.row_value.{i}")
                                 node_ref=val_ref
                                 class="kv-input"
                                 prop:value=row.value
@@ -363,7 +363,7 @@ pub fn KvEditor(
                                     set_rows.run(rs);
                                 }
                             />
-                            <button
+                            <button data-bh=format!("kv.row_delete.{i}")
                                 class="kv-remove"
                                 title="Удалить"
                                 on:click=move |_| {
@@ -427,7 +427,7 @@ fn KvEmptyState(
     let ph_val = create_rw_signal(String::new());
     type_placeholders_once(example_key, example_value, ph_key, ph_val);
     view! {
-        <button class="kv-empty" on:click=add_row title="Добавить строку">
+        <button data-bh="kv.add_empty" class="kv-empty" on:click=add_row title="Добавить строку">
             <span class="kv-empty-row">
                 <span class="kv-empty-check"/>
                 <span class="kv-empty-cell">{move || ph_key.get()}</span>
@@ -493,7 +493,7 @@ pub fn CopyButton(
     title: &'static str,
 ) -> impl IntoView {
     view! {
-        <button
+        <button data-bh=format!("ui.copy.{}", title)
             class=move || if ok.get() { "copy-btn ok" } else { "copy-btn" }
             title=move || if ok.get() { "Скопировано!".to_string() } else { title.to_string() }
             on:click=move |_| {

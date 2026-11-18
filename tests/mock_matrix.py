@@ -8,6 +8,17 @@ PROFILE_NAME = "pytest-mock"
 BASE = os.environ.get("HOP_URL", "http://127.0.0.1:3000").rstrip("/")
 GATEWAY = f"http://127.0.0.1:{LISTEN_PORT}"
 results = []
+
+def _enable_debug_api():
+    # v1.2.0: /debug/* закрыты гейтом; тесты работают по полной поверхности.
+    req = urllib.request.Request(BASE + "/api/debug-mode", data=b'{"on": true}',
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+_enable_debug_api()
 srv = None
 
 # ---------- local echo server ----------
@@ -106,26 +117,26 @@ def make_profile():
 
 # ---------- tests ----------
 def T1_crud():
-    st, hdr, b, val = api_json("POST", "/api/mock/profile", make_profile())
+    st, hdr, b, val = api_json("POST", "/debug/mock/profile", make_profile())
     check("T1 create profile", st == 200 and isinstance(val, dict) and val.get("ok") is True, f"status={st} body={b[:120]!r}")
-    st, hdr, b, val = api_json("GET", f"/api/mock/profile?name={PROFILE_NAME}")
+    st, hdr, b, val = api_json("GET", f"/debug/mock/profile?name={PROFILE_NAME}")
     ok = st == 200 and isinstance(val, dict) and val.get("name") == PROFILE_NAME and val.get("listen_port") == LISTEN_PORT and len(val.get("rules", [])) == 1
     check("T1 get profile", ok, f"status={st}")
-    st, hdr, b, val = api_json("GET", "/api/mock/profiles")
+    st, hdr, b, val = api_json("GET", "/debug/mock/profiles")
     ok = st == 200 and isinstance(val, dict) and any(p.get("name") == PROFILE_NAME for p in val.get("profiles", []))
     check("T1 list profiles", ok, f"status={st}")
 
 def T2_start_stop():
-    st, hdr, b, val = api_json("POST", "/api/mock/start", {"name": PROFILE_NAME})
+    st, hdr, b, val = api_json("POST", "/debug/mock/start", {"name": PROFILE_NAME})
     check("T2 start", st == 200 and isinstance(val, dict) and val.get("ok") is True and val.get("port") == LISTEN_PORT, f"status={st} body={b[:120]!r}")
     check("T2 port listening", can_connect(LISTEN_PORT), "")
-    st, hdr, b, val = api_json("POST", "/api/mock/stop", {"name": PROFILE_NAME})
+    st, hdr, b, val = api_json("POST", "/debug/mock/stop", {"name": PROFILE_NAME})
     check("T2 stop", st == 200 and isinstance(val, dict) and val.get("ok") is True, f"status={st}")
     time.sleep(0.2)
     check("T2 port refused", not can_connect(LISTEN_PORT), "")
 
 def T3_randomize():
-    st, hdr, b, val = api_json("POST", "/api/mock/start", {"name": PROFILE_NAME})
+    st, hdr, b, val = api_json("POST", "/debug/mock/start", {"name": PROFILE_NAME})
     check("T3 start", st == 200 and isinstance(val, dict) and val.get("ok") is True, f"status={st}")
     url = f"{GATEWAY}/api/test/x"
     st1, h1, b1 = call_url(url, timeout=5)
@@ -144,28 +155,28 @@ def T3_randomize():
     check("T3 content-type", h1.get("content-type", "").startswith("application/json") and h2.get("content-type", "").startswith("application/json"), f"{h1.get('content-type')}")
 
 def T4_static():
-    st, hdr, b, val = api_json("GET", f"/api/mock/profile?name={PROFILE_NAME}")
+    st, hdr, b, val = api_json("GET", f"/debug/mock/profile?name={PROFILE_NAME}")
     if st != 200 or not isinstance(val, dict):
         check("T4 load profile", False, f"status={st}")
         return
     val["rules"][0]["variants"][0]["randomize"] = False
-    st, hdr, b, val2 = api_json("POST", "/api/mock/profile", val)
+    st, hdr, b, val2 = api_json("POST", "/debug/mock/profile", val)
     check("T4 save static", st == 200 and isinstance(val2, dict) and val2.get("ok") is True, f"status={st}")
-    api_json("POST", "/api/mock/start", {"name": PROFILE_NAME})
+    api_json("POST", "/debug/mock/start", {"name": PROFILE_NAME})
     url = f"{GATEWAY}/api/test/x"
     st1, h1, b1 = call_url(url, timeout=5)
     st2, h2, b2 = call_url(url, timeout=5)
     check("T4 static equal", st1 == 200 and st2 == 200 and b1 == b2, f"status={st1}/{st2} len={len(b1)}/{len(b2)}")
 
 def T5_no_rule():
-    st, hdr, b, val = api_json("GET", f"/api/mock/profile?name={PROFILE_NAME}")
+    st, hdr, b, val = api_json("GET", f"/debug/mock/profile?name={PROFILE_NAME}")
     if st != 200 or not isinstance(val, dict):
         check("T5 load profile", False, f"status={st}")
         return
     val["upstream"] = None
-    st, hdr, b, val2 = api_json("POST", "/api/mock/profile", val)
+    st, hdr, b, val2 = api_json("POST", "/debug/mock/profile", val)
     check("T5 save no-upstream", st == 200 and isinstance(val2, dict) and val2.get("ok") is True, f"status={st}")
-    api_json("POST", "/api/mock/start", {"name": PROFILE_NAME})
+    api_json("POST", "/debug/mock/start", {"name": PROFILE_NAME})
     st, hdr, b = call_url(f"{GATEWAY}/nope", timeout=5)
     err = None
     try:
@@ -176,14 +187,14 @@ def T5_no_rule():
     check("T5 no-rule 404", st == 404 and isinstance(err, str) and len(err) > 0, f"status={st} body={b[:120]!r}")
 
 def T6_passthrough():
-    st, hdr, b, val = api_json("GET", f"/api/mock/profile?name={PROFILE_NAME}")
+    st, hdr, b, val = api_json("GET", f"/debug/mock/profile?name={PROFILE_NAME}")
     if st != 200 or not isinstance(val, dict):
         check("T6 load profile", False, f"status={st}")
         return
     val["upstream"] = f"http://127.0.0.1:{ECHO_PORT}"
-    st, hdr, b, val2 = api_json("POST", "/api/mock/profile", val)
+    st, hdr, b, val2 = api_json("POST", "/debug/mock/profile", val)
     check("T6 save upstream", st == 200 and isinstance(val2, dict) and val2.get("ok") is True, f"status={st}")
-    api_json("POST", "/api/mock/start", {"name": PROFILE_NAME})
+    api_json("POST", "/debug/mock/start", {"name": PROFILE_NAME})
     payload = b'{"hello":"world"}'
     st, hdr, b = call_url(f"{GATEWAY}/echo", method="POST", data=payload, headers={"Content-Type": "application/json"}, timeout=5)
     body_field = None
@@ -195,7 +206,7 @@ def T6_passthrough():
     check("T6 passthrough body", body_field == payload.decode(), f"body={body_field!r}")
 
 def T7_traffic():
-    st, hdr, b, val = api_json("GET", f"/api/mock/traffic?name={PROFILE_NAME}")
+    st, hdr, b, val = api_json("GET", f"/debug/mock/traffic?name={PROFILE_NAME}")
     ok = st == 200 and isinstance(val, dict) and isinstance(val.get("traffic"), list)
     found = False
     if ok:
@@ -207,7 +218,7 @@ def T7_traffic():
 
 def T7b_traffic_all():
     # глобальная панель «Трафик»: без name — трафик всех профилей, записи с полем profile
-    st, hdr, b, val = api_json("GET", "/api/mock/traffic")
+    st, hdr, b, val = api_json("GET", "/debug/mock/traffic")
     ok = st == 200 and isinstance(val, dict) and isinstance(val.get("traffic"), list)
     found = False
     if ok:
@@ -218,13 +229,13 @@ def T7b_traffic_all():
     check("T7b traffic all-profiles", ok and found, f"status={st} count={len(val.get('traffic', [])) if isinstance(val, dict) else '?'}")
 
 def T8_preview():
-    st, hdr, b, val = api_json("POST", "/api/mock/preview", {"json": "{{int:5:5}}", "randomize": True})
+    st, hdr, b, val = api_json("POST", "/debug/mock/preview", {"json": "{{int:5:5}}", "randomize": True})
     ok = st == 200 and isinstance(val, dict) and val.get("text") == "5"
     check("T8 preview", ok, f"status={st} body={b[:120]!r}")
 
 # ---------- runner ----------
 # (хвост ответа модели d5 оборвался на T8; раннер дописан валидатором
-#  по образцу api_matrix.py; cleanup учитывает POST /api/mock/profile/delete
+#  по образцу api_matrix.py; cleanup учитывает POST /debug/mock/profile/delete
 #  — фактический маршрут control_router в mock_server.rs)
 def main():
     global srv
@@ -237,8 +248,8 @@ def main():
         except Exception as e:
             check(fn.__name__, False, f"exception: {e!r}")
     try:
-        api_json("POST", "/api/mock/stop", {"name": PROFILE_NAME})
-        api_json("POST", "/api/mock/profile/delete", {"name": PROFILE_NAME})
+        api_json("POST", "/debug/mock/stop", {"name": PROFILE_NAME})
+        api_json("POST", "/debug/mock/profile/delete", {"name": PROFILE_NAME})
     except Exception:
         pass
     srv.shutdown()

@@ -11,6 +11,7 @@ use crate::ui::*;
 
 
 use crate::actlog::*;
+use crate::debug_bridge;
 use crate::method_select::*;
 use crate::pill_nav;
 use crate::search::*;
@@ -162,6 +163,77 @@ pub fn App() -> impl IntoView {
     let abort_ctrl = create_rw_signal(None::<web_sys::AbortController>);
     let run_abort_ctrl = create_rw_signal(None::<web_sys::AbortController>);
     let timer_id = create_rw_signal(None::<i32>);
+
+    // ----- Debug-мост: живое состояние формы запроса для тестовых инструментов -----
+    let debug_on = create_rw_signal(false);
+    let toggle_mock = move || mock_mode.update(|m| *m = !*m);
+    let toggle_debug = move || {
+        let on = !debug_on.get_untracked();
+        debug_on.set(on);
+        debug_bridge::set_active(on);
+        spawn_local(async move {
+            let _ = debug_bridge::api_post("/api/debug-mode", &serde_json::json!({"on": on})).await;
+        });
+    };
+    {
+        debug_bridge::register_setter("request.url", move |v| url.set(v.as_str().unwrap_or("").to_string()));
+        debug_bridge::register_setter("request.method", move |v| {
+            let m = v.as_str().unwrap_or("GET").trim().to_uppercase();
+            if matches!(m.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS") {
+                method.set(m);
+            }
+        });
+        debug_bridge::register_setter("request.body", move |v| {
+            body.set(match v {
+                serde_json::Value::String(s) => s,
+                serde_json::Value::Null => String::new(),
+                other => other.to_string(),
+            });
+        });
+        debug_bridge::register_setter("request.tab", move |v| {
+            let t = v.as_str().unwrap_or("params").to_lowercase();
+            if matches!(t.as_str(), "params" | "headers" | "body") {
+                tab.set(t);
+            }
+        });
+        debug_bridge::register_snapshot("request", move || {
+            serde_json::json!({
+                "url": url.get(),
+                "method": method.get(),
+                "body": body.get(),
+                "tab": tab.get(),
+            })
+        });
+        debug_bridge::register_reset(move || {
+            url.set(String::new());
+            method.set("GET".to_string());
+            body.set(String::new());
+            tab.set("params".to_string());
+        });
+        debug_bridge::register_click("mock", toggle_mock);
+        debug_bridge::register_click("debug", toggle_debug);
+        debug_bridge::register_snapshot("toggles", move || {
+            serde_json::json!({
+                "ui_mock": mock_mode.get(),
+                "ui_debug": debug_on.get(),
+            })
+        });
+        // Тумблер отражает реальное состояние гейта: опрашиваем GET /api/debug-mode каждые 2 с.
+        // API-тумблер — единственный источник истины: тестовый инструмент открывает гейт
+        // без кликов, UI и мост подхватывают состояние сами.
+        spawn_local(async move {
+            loop {
+                if let Ok(v) = debug_bridge::api_get("/api/debug-mode").await {
+                    let on = v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
+                    if on != debug_on.get_untracked() {
+                        debug_on.set(on);
+                        debug_bridge::set_active(on);
+                    }
+                }
+                debug_bridge::sleep_ms(2000).await;
+            }
+        });
+    }
 
     /* ---------- persistence ---------- */
     let _ = Effect::watch(
@@ -1140,15 +1212,23 @@ pub fn App() -> impl IntoView {
                     <img class="brand-icon" src="/brand.png" alt="" />
                     <span class="brand-name">"Bunny\u{a0}Hops"</span>
                 </div>
-                <button class="tab-add"
+                <button data-bh="topbar.mock_toggle" class="tab-add"
                     title="Mock-сервер (BunnyProx)"
                     style=move || if mock_mode.get() {
                         "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
                     } else {
                         "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
                     }
-                    on:click=move |_| mock_mode.update(|m| *m = !*m)>{ "Mock" }</button>
-                <button class={move || if invite_save.get() {
+                    on:click=move |_| toggle_mock()>{ "Mock" }</button>
+                <button data-bh="topbar.mcp_toggle" class="tab-add"
+                    title="MCP-гейт: API для тестовых инструментов (/api/debug-mode, /debug/*)"
+                    style=move || if debug_on.get() {
+                        "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
+                    } else {
+                        "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
+                    }
+                    on:click=move |_| toggle_debug()>{ "MCP" }</button>
+                <button data-bh="topbar.tab_save" class={move || if invite_save.get() {
                         "tab-add invite".to_string()
                     } else {
                         "tab-add".to_string()
@@ -1162,7 +1242,7 @@ pub fn App() -> impl IntoView {
                 <div class="tab-cloud">
                     <Show when={move || !api_calls.get().is_empty()}>
                         <span class="tab-chip tech">
-                            <button class="tab-chip-open"
+                            <button data-bh="topbar.api_cloud" class="tab-chip-open"
                                 on:click={move |_| {
                                     api_panel.update(|v| *v = !*v);
                                     refresh_api.run(());
@@ -1206,11 +1286,11 @@ pub fn App() -> impl IntoView {
                                     }
                                     c
                                 }} title={move || cur_title().url}>
-                                    <button class="tab-chip-open"
+                                    <button data-bh=format!("tab.chip.{id}") class="tab-chip-open"
                                         on:click={let id = id.clone(); move |_| load_saved_req.run(id.clone())}>
                                         <span class="tab-chip-name">{move || cur_name().name}</span>
                                     </button>
-                                    <button class="tab-chip-del" title="Удалить"
+                                    <button data-bh=format!("tab.delete.{id}") class="tab-chip-del" title="Удалить"
                                         on:click={let id = id.clone(); move |_| del_confirm.set(Some(id.clone()))}>"✕"</button>
                                 </span>
                             }
@@ -1220,7 +1300,7 @@ pub fn App() -> impl IntoView {
                 
                 <div class=move || format!("cmd-search {}", if search_open.get() { "cmd-open" } else if mac { "cmd-mac" } else { "cmd-pc" })>
                     <Show when={move || !search_open.get()}>
-                        <button class="cmd-pill" type="button"
+                        <button data-bh="topbar.search_open" class="cmd-pill" type="button"
                             title="Поиск по экрану" on:click={move |_| search_open.set(true)}>
                             <span class="cmd-label">"Search"</span>
                             <span class="cmd-keys" aria-hidden="true">
@@ -1236,7 +1316,7 @@ pub fn App() -> impl IntoView {
                                 <circle cx="11" cy="11" r="7"></circle>
                                 <path d="m20 20-3.5-3.5"></path>
                             </svg>
-                            <input id="hop-screen-search" class="cmd-input" type="text" placeholder="Search"
+                            <input data-bh="topbar.search_input" id="hop-screen-search" class="cmd-input" type="text" placeholder="Search"
                                 value=move || search_q.get()
                                 on:input=move |ev| {
                                     let v = input_value(ev);
@@ -1280,7 +1360,7 @@ pub fn App() -> impl IntoView {
                                 let id = g.id.clone();
                                 let name = g.name.clone();
                                 view! {
-                                    <button class="group-dot" title=name
+                                    <button data-bh=format!("group.dot.{id}") class="group-dot" title=name
                                         on:click={let id = id.clone(); move |_| restore_group.run(id.clone())}>
                                         {g.num.to_string()}
                                     </button>
@@ -1292,10 +1372,10 @@ pub fn App() -> impl IntoView {
             </Show>
             <div class="toolbar-row">
                 <div class="zoom-controls" title="Масштаб интерфейса">
-                    <button class="zoom-btn" disabled=move || scale_idx.get() == SCALES.len() - 1
+                    <button data-bh="topbar.zoom_out" class="zoom-btn" disabled=move || scale_idx.get() == SCALES.len() - 1
                         title="Уменьшить шрифт (экономия места)" on:click=move |_| zoom_by(1)>"A−"</button>
                     <span class="zoom-label">{move || format!("{}%", (SCALES[scale_idx.get()] * 100.0).round() as i64)}</span>
-                    <button class="zoom-btn" disabled=move || scale_idx.get() == 0
+                    <button data-bh="topbar.zoom_in" class="zoom-btn" disabled=move || scale_idx.get() == 0
                         title="Увеличить шрифт" on:click=move |_| zoom_by(-1)>"A+"</button>
                 </div>
                 <div class="urlbar">
@@ -1303,7 +1383,7 @@ pub fn App() -> impl IntoView {
                         get_method=Callback::new(move |_| method.get())
                         set_method=Callback::new(move |v: String| method.set(v.clone()))
                     />
-                    <input
+                    <input data-bh="request.url"
                         class="url-input"
                         placeholder=move || if url.get().is_empty() { ph_hint.get() } else { String::new() }
                         spellcheck="false"
@@ -1316,10 +1396,10 @@ pub fn App() -> impl IntoView {
                         }
                     />
                     <Show when={move || loading.get() || running.get()} fallback={move || view! {
-                        <button class="send-btn" disabled={move || !can_send.get()}
+                        <button data-bh="request.send" class="send-btn" disabled={move || !can_send.get()}
                             on:click=move |_| send.run(())>"Send"</button>
                     }}>
-                        <button class="send-btn stop" title="Остановить" on:click=move |_| stop.run(())>"■ Stop"</button>
+                        <button data-bh="request.stop" class="send-btn stop" title="Остановить" on:click=move |_| stop.run(())>"■ Stop"</button>
                     </Show>
                 </div>
             </div>
@@ -1355,14 +1435,14 @@ pub fn App() -> impl IntoView {
                     <nav class="tabs">
                         <div class="tab-track" id="req-tabs" node_ref=req_track>
                         <span class="tab-pill"/>
-                        <button class=move || if tab.get() == "params" { "tab active" } else { "tab" }
+                        <button data-bh="request.tab_params" class=move || if tab.get() == "params" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("params".to_string())>
                             "URL Params"
                             <Show when={move || enabled_params.get() != 0}>
                                 <span class="tab-count">{move || enabled_params.get()}</span>
                             </Show>
                         </button>
-                        <button class=move || if tab.get() == "headers" { "tab active" } else { "tab" }
+                        <button data-bh="request.tab_headers" class=move || if tab.get() == "headers" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("headers".to_string())>
                             "Headers"
                             <Show when={move || enabled_headers.get() != 0}>
@@ -1370,7 +1450,7 @@ pub fn App() -> impl IntoView {
                             </Show>
                         </button>
                         <Show when={move || has_body.get()}>
-                            <button class=move || if tab.get() == "body" { "tab active" } else { "tab" }
+                            <button data-bh="request.tab_body" class=move || if tab.get() == "body" { "tab active" } else { "tab" }
                                 on:click=move |_| tab.set("body".to_string())>
                                 "Body"
                                 <Show when={move || !body.get().trim().is_empty()}>
@@ -1378,14 +1458,14 @@ pub fn App() -> impl IntoView {
                                 </Show>
                             </button>
                         </Show>
-                        <button class=move || if tab.get() == "steps" { "tab active" } else { "tab" }
+                        <button data-bh="request.tab_steps" class=move || if tab.get() == "steps" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("steps".to_string())>
                             "Scenario"
                             <Show when={move || !steps.get().is_empty()}>
                                 <span class="tab-count">{move || steps.get().len()}</span>
                             </Show>
                         </button>
-                        <button class=move || if tab.get() == "vars" { "tab active" } else { "tab" }
+                        <button data-bh="request.tab_vars" class=move || if tab.get() == "vars" { "tab active" } else { "tab" }
                             on:click=move |_| tab.set("vars".to_string())>
                             "Vars"
                             <Show when={move || !vars_map.get().is_empty()}>
@@ -1456,7 +1536,7 @@ pub fn App() -> impl IntoView {
                                         />
                                     </Show>
                                 </div>
-                                <textarea
+                                <textarea data-bh="request.body"
                                     class="body-textarea"
                                     placeholder="{\"hello\": \"world\"}"
                                     spellcheck="false"
@@ -1467,18 +1547,18 @@ pub fn App() -> impl IntoView {
                         <Show when={move || tab.get() == "steps"}>
                             <div class="steps-panel">
                                 <div class="steps-actions">
-                                    <button class="btn-accent" disabled=move || running.get() || steps.get().is_empty()
+                                    <button data-bh="steps.run_all" class="btn-accent" disabled=move || running.get() || steps.get().is_empty()
                                         title="Выполнить шаги последовательно" on:click=move |_| run_all.run(())>
                                         "▶ Run all"
                                     </button>
-                                    <button class="btn-ghost" disabled=move || running.get() || url.get().trim().is_empty()
+                                    <button data-bh="steps.add_current" class="btn-ghost" disabled=move || running.get() || url.get().trim().is_empty()
                                         title="Добавить настроенный сейчас запрос как шаг"
                                         on:click=move |_| add_step_from_current.run(())>
                                         "＋ Текущий запрос"
                                     </button>
-                                    <button class="btn-ghost" disabled=move || running.get() || steps.get().is_empty()
+                                    <button data-bh="steps.reset" class="btn-ghost" disabled=move || running.get() || steps.get().is_empty()
                                         title="Сбросить статусы" on:click=move |_| reset_steps.run(())>"↺ Reset"</button>
-                                    <button class="btn-ghost danger" disabled=move || running.get() || steps.get().is_empty()
+                                    <button data-bh="steps.clear" class="btn-ghost danger" disabled=move || running.get() || steps.get().is_empty()
                                         title="Очистить список" on:click=move |_| clear_steps.run(())>"🗑"</button>
                                 </div>
                                 <Show when={move || steps.get().is_empty()}>
@@ -1537,7 +1617,7 @@ pub fn App() -> impl IntoView {
                                                                 update_step_at(&steps, i, |s| s.method = v);
                                                             })
                                                         />
-                                                        <input class="kv-input" spellcheck="false" placeholder="URL (можно {{var}})"
+                                                        <input data-bh=format!("step.url.{i}") class="kv-input" spellcheck="false" placeholder="URL (можно {{var}})"
                                                             value=move || step_at(&steps, i, |s| s.url.clone())
                                                             on:input=move |ev| {
                                                                 let v = input_value(ev);
@@ -1559,7 +1639,7 @@ pub fn App() -> impl IntoView {
                                                         empty_hint="Клик по строке — добавить"
                                                     />
                                                     <Show when={move || !is_bodyless(&step_at(&steps, i, |s| s.method.clone()))}>
-                                                        <textarea class="body-textarea step-body-textarea"
+                                                        <textarea data-bh=format!("step.body.{i}") class="body-textarea step-body-textarea"
                                                             placeholder="{\"hello\": \"{{name}}\"}" spellcheck="false"
                                                             on:input=move |ev| {
                                                                 let v = input_value(ev);
@@ -1568,7 +1648,7 @@ pub fn App() -> impl IntoView {
                                                     </Show>
                                                     <div class="step-row capture-row">
                                                         <label>"Захват переменной:"</label>
-                                                        <input class="kv-input" style="max-width:120px" placeholder="имя"
+                                                        <input data-bh=format!("step.capture_name.{i}") class="kv-input" style="max-width:120px" placeholder="имя"
                                                             spellcheck="false"
                                                             value=move || step_at(&steps, i, |s| s.capture_name.clone())
                                                             on:input=move |ev| {
@@ -1577,14 +1657,14 @@ pub fn App() -> impl IntoView {
                                                                     .collect();
                                                                 update_step_at(&steps, i, |s| s.capture_name = v);
                                                             }/>
-                                                        <input class="kv-input" placeholder="$.data.token"
+                                                        <input data-bh=format!("step.capture_path.{i}") class="kv-input" placeholder="$.data.token"
                                                             spellcheck="false"
                                                             value=move || step_at(&steps, i, |s| s.capture_path.clone())
                                                             on:input=move |ev| {
                                                                 let v = input_value(ev);
                                                                 update_step_at(&steps, i, |s| s.capture_path = v);
                                                             }/>
-                                                        <button class="kv-remove" title="Удалить шаг"
+                                                        <button data-bh=format!("step.delete.{i}") class="kv-remove" title="Удалить шаг"
                                                             on:click=move |_| {
                                                                 if let Some(sid) = step_at_opt(&steps, i, |s| s.id.clone()) {
                                                                     remove_step.run(sid);
@@ -1696,9 +1776,9 @@ pub fn App() -> impl IntoView {
                                 }
                             }}>
                                 <div class="body-view-toggle">
-                                    <button class=move || if pretty.get() { "view-btn active" } else { "view-btn" }
+                                    <button data-bh="response.view_pretty" class=move || if pretty.get() { "view-btn active" } else { "view-btn" }
                                         on:click=move |_| pretty.set(true)>"Pretty"</button>
-                                    <button class=move || if !pretty.get() { "view-btn active" } else { "view-btn" }
+                                    <button data-bh="response.view_raw" class=move || if !pretty.get() { "view-btn active" } else { "view-btn" }
                                         on:click=move |_| pretty.set(false)>"Raw"</button>
                                 </div>
                             </Show>
@@ -1706,9 +1786,9 @@ pub fn App() -> impl IntoView {
                         <nav class="tabs">
                             <div class="tab-track" id="resp-tabs" node_ref=resp_track>
                             <span class="tab-pill"/>
-                            <button class=move || if resp_tab.get() == "body" { "tab active" } else { "tab" }
+                            <button data-bh="response.tab_body" class=move || if resp_tab.get() == "body" { "tab active" } else { "tab" }
                                 on:click=move |_| resp_tab.set("body".to_string())>"Response body"</button>
-                            <button class=move || if resp_tab.get() == "headers" { "tab active" } else { "tab" }
+                            <button data-bh="response.tab_headers" class=move || if resp_tab.get() == "headers" { "tab active" } else { "tab" }
                                 on:click=move |_| resp_tab.set("headers".to_string())>"Response headers"</button>
                             </div>
                         </nav>
@@ -1718,7 +1798,7 @@ pub fn App() -> impl IntoView {
                         }}>
                             <div class="search-bar">
                                 <span class="search-icon">"🔍"</span>
-                                <input id="hop-search-input" class="search-input" spellcheck="false"
+                                <input data-bh="response.search_input" id="hop-search-input" class="search-input" spellcheck="false"
                                     placeholder="Search"
                                     value=move || query.get()
                                     on:input=move |ev| query.set(input_value(ev))
@@ -1741,11 +1821,11 @@ pub fn App() -> impl IntoView {
                                         }
                                     }}
                                 </span>
-                                <button class="search-nav" disabled=move || match_count.get() == 0
+                                <button data-bh="response.search_prev" class="search-nav" disabled=move || match_count.get() == 0
                                     title="Предыдущее (Shift+Enter)" on:click=move |_| goto_match(-1)>"↑"</button>
-                                <button class="search-nav" disabled=move || match_count.get() == 0
+                                <button data-bh="response.search_next" class="search-nav" disabled=move || match_count.get() == 0
                                     title="Следующее (Enter)" on:click=move |_| goto_match(1)>"↓"</button>
-                                <button class="search-nav" title="Очистить" on:click=move |_| query.set(String::new())>"✕"</button>
+                                <button data-bh="response.search_clear" class="search-nav" title="Очистить" on:click=move |_| query.set(String::new())>"✕"</button>
                             </div>
                         </Show>
                         <div class="pane-body">
@@ -1843,9 +1923,9 @@ pub fn App() -> impl IntoView {
                         <div class="api-panel-head">
                             <span>"запросы, присланные в API"</span>
                             <span class="api-head-btns">
-                                <button class="api-refresh" title="Обновить"
+                                <button data-bh="api_log.refresh" class="api-refresh" title="Обновить"
                                     on:click={move |_| refresh_api.run(())}>"↻"</button>
-                                <button class="api-refresh" title="Закрыть (Esc)"
+                                <button data-bh="api_log.close" class="api-refresh" title="Закрыть (Esc)"
                                     on:click={move |_| api_panel.set(false)}>"✕"</button>
                             </span>
                         </div>
@@ -1892,7 +1972,7 @@ pub fn App() -> impl IntoView {
                     }>
                     <div class="modal">
                         <div class="modal-title">"Новая вкладка"</div>
-                        <input class="modal-input" type="text" placeholder="Название вкладки"
+                        <input data-bh="modal.tab_name" class="modal-input" type="text" placeholder="Название вкладки"
                             autofocus=true
                             value=move || modal_name.get()
                             on:input=move |ev| {
@@ -1910,8 +1990,8 @@ pub fn App() -> impl IntoView {
                             <div class="modal-err">{move || modal_err.get()}</div>
                         </Show>
                         <div class="modal-actions">
-                            <button class="modal-save" on:click=move |_| save_current.run(())>"Сохранить"</button>
-                            <button class="modal-cancel" on:click=move |_| modal_open.set(false)>"Отмена"</button>
+                            <button data-bh="modal.tab_save_confirm" class="modal-save" on:click=move |_| save_current.run(())>"Сохранить"</button>
+                            <button data-bh="modal.tab_save_cancel" class="modal-cancel" on:click=move |_| modal_open.set(false)>"Отмена"</button>
                         </div>
                     </div>
                 </div>
@@ -1931,13 +2011,13 @@ pub fn App() -> impl IntoView {
                     <div class="modal">
                         <div class="modal-title">"Удалить вкладку?"</div>
                         <div class="modal-actions">
-                            <button class="modal-save danger" on:click=move |_| {
+                            <button data-bh="modal.tab_del_confirm" class="modal-save danger" on:click=move |_| {
                                 if let Some(id) = del_confirm.get_untracked() {
                                     delete_saved.run(id);
                                 }
                                 del_confirm.set(None);
                             }>"Удалить"</button>
-                            <button class="modal-cancel" on:click=move |_| del_confirm.set(None)>"Отмена"</button>
+                            <button data-bh="modal.tab_del_cancel" class="modal-cancel" on:click=move |_| del_confirm.set(None)>"Отмена"</button>
                         </div>
                     </div>
                 </div>
@@ -1957,7 +2037,7 @@ pub fn App() -> impl IntoView {
                     <div class="modal">
                         <div class="modal-title">"Облако заполнено"</div>
                         <div class="modal-hint">"Все вкладки объединятся в группу. Клик по значку группы вернёт их в облако."</div>
-                        <input class="modal-input" type="text" placeholder="Имя группы"
+                        <input data-bh="modal.group_name" class="modal-input" type="text" placeholder="Имя группы"
                             autofocus=true
                             value=move || group_name.get()
                             on:input=move |ev| group_name.set(input_value(ev))
@@ -1969,13 +2049,14 @@ pub fn App() -> impl IntoView {
                                 }
                             } />
                         <div class="modal-actions">
-                            <button class="modal-save" on:click=move |_| save_group.run(())>"Создать группу"</button>
-                            <button class="modal-cancel" on:click=move |_| group_modal.set(false)>"Отмена"</button>
+                            <button data-bh="modal.group_create" class="modal-save" on:click=move |_| save_group.run(())>"Создать группу"</button>
+                            <button data-bh="modal.group_cancel" class="modal-cancel" on:click=move |_| group_modal.set(false)>"Отмена"</button>
                         </div>
                     </div>
                 </div>
             </Show>
-            <button class="actlog-toggle"
+            <div class="bottom-dock">
+            <button data-bh="bottom.logs_toggle" class="actlog-toggle"
                 on:click=move |_| {
                     if !log_open.get_untracked() {
                         log_h.set(60);
@@ -1986,7 +2067,7 @@ pub fn App() -> impl IntoView {
                 "Logs"
                 <span class="actlog-count">{move || act_log.get().len()}</span>
             </button>
-            <button class="actlog-toggle"
+            <button data-bh="bottom.traffic_toggle" class="actlog-toggle"
                 on:click=move |_| {
                     if !trf_open.get_untracked() {
                         trf_h.set(60);
@@ -1997,6 +2078,7 @@ pub fn App() -> impl IntoView {
                 "Трафик"
                 <span class="actlog-count">{move || trf_log.get().len()}</span>
             </button>
+            </div>
             <Show when=move || log_open.get()>
                 <div class="actlog" style=move || {
                     let cap = tab_bottom_gap().unwrap_or(i32::MAX);

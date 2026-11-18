@@ -360,6 +360,7 @@ pub mod eyes;
 pub mod control;
 pub mod mock_server;
 pub mod mock_random;
+pub mod debug_api;
 use screenshot::screenshot_handler;
 use eyes::eyes_handler;
 
@@ -368,8 +369,12 @@ use eyes::eyes_handler;
 /// `Some(p)` — строгий bind на p (явный запрос через env PORT), ошибка если занят.
 pub async fn run_server(dist: PathBuf, fixed_port: Option<u16>) -> Result<u16, String> {
     if !dist.join("index.html").is_file() {
-        return Err("не найдена папка dist/ рядом с сервером; сборка отсутствует".to_string());
+        let e = "не найдена папка dist/ рядом с сервером; сборка отсутствует".to_string();
+        control::log_action("server", "start.fail", serde_json::json!({"error": e}));
+        return Err(e);
     }
+    // dist позже уходит в замыкание fallback, путь фиксируем сразу.
+    let dist_str = dist.display().to_string();
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -380,13 +385,21 @@ pub async fn run_server(dist: PathBuf, fixed_port: Option<u16>) -> Result<u16, S
         .unwrap();
 
     control::STARTED.set(std::time::Instant::now()).ok();
+    debug_api::init_from_env();
     let app = Router::new()
-        .route("/proxy", any(proxy_handler))
         .route("/screenshot", any(screenshot_handler))
-        .route("/api/eyes", get(eyes_handler))
-        .route("/api/automation-rules", get(api_rules_handler))
-        .merge(mock_server::control_router())
         .merge(control::control_router())
+        .merge(debug_api::contract_router())
+        .merge(
+            Router::new()
+                .route("/debug/proxy", any(proxy_handler))
+                .route("/debug/eyes", get(eyes_handler))
+                .route("/debug/automation-rules", get(api_rules_handler))
+                .merge(mock_server::control_router())
+                .merge(control::mcp_router())
+                .merge(debug_api::mcp_router())
+                .layer(axum::middleware::from_fn(debug_api::gate_or_ui)),
+        )
         .fallback(move |req: Request| {
             let root = dist.clone();
             async move { serve_static_or_spa(&root, req).await }
@@ -394,24 +407,46 @@ pub async fn run_server(dist: PathBuf, fixed_port: Option<u16>) -> Result<u16, S
         .with_state(AppState {
             client,
             api_log: Arc::new(Mutex::new(Vec::new())),
-        });
+        })
+        // Транспортный журнал: ни один запрос к API не проходит незамеченным.
+        .layer(axum::middleware::from_fn(
+            control::api_access_middleware,
+        ));
 
     // Порт: по умолчанию рандомизация на каждом старте; строгий bind только при явном PORT.
     // Bind только на loopback: /proxy — открытый прокси, наружу (LAN) торчать нечем (правило ревью 17.11.2026).
-    let listener = match fixed_port {
+    let bind = match fixed_port {
         Some(p) => tokio::net::TcpListener::bind(("127.0.0.1", p))
             .await
-            .map_err(|e| format!("порт {p} занят или недоступен: {e}"))?,
+            .map_err(|e| format!("порт {p} занят или недоступен: {e}")),
         None => tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
-            .map_err(|e| format!("не удалось занять порт: {e}"))?,
+            .map_err(|e| format!("не удалось занять порт: {e}")),
+    };
+    let listener = match bind {
+        Ok(l) => l,
+        Err(e) => {
+            control::log_action("server", "start.fail", serde_json::json!({"error": e}));
+            return Err(e);
+        }
     };
     let port = listener
         .local_addr()
         .map_err(|e| format!("не удалось прочитать адрес: {e}"))?
         .port();
+    debug_api::set_port(port);
 
     let url = format!("http://localhost:{port}");
+    // Первая запись журнала с момента запуска: видно старт и номер порта.
+    control::log_action(
+        "server",
+        "start",
+        serde_json::json!({
+            "port": port,
+            "version": env!("CARGO_PKG_VERSION"),
+            "dist": dist_str,
+        }),
+    );
     println!("==========================================");
     println!("  Bunny Hops запущен! (Rust)");
     println!("  Адрес: {url}");

@@ -15,6 +15,31 @@ pub fn sleep_ms_local(ms: i32) -> impl std::future::Future<Output = ()> {
     }
 }
 
+/// fetch с пометкой «запрос из UI» (заголовок `x-hop-ui`): сервер пропускает
+/// такие запросы сквозь MCP-гейт — приложение работает и при выключенном MCP.
+pub fn ui_fetch(
+    url: &str,
+    method: Option<&str>,
+    body: Option<&str>,
+) -> Result<js_sys::Promise, String> {
+    let win = web_sys::window().ok_or("no window")?;
+    let init = web_sys::RequestInit::new();
+    if let Some(m) = method {
+        init.set_method(m);
+    }
+    let headers = web_sys::Headers::new().map_err(|_| "headers")?;
+    headers.set("x-hop-ui", "1").map_err(|_| "x-hop-ui")?;
+    headers
+        .set("Content-Type", "application/json")
+        .map_err(|_| "content-type")?;
+    init.set_headers(&wasm_bindgen::JsValue::from(&headers));
+    if let Some(b) = body {
+        init.set_body(&wasm_bindgen::JsValue::from_str(b));
+    }
+    let req = web_sys::Request::new_with_str_and_init(url, &init).map_err(|_| "request")?;
+    Ok(win.fetch_with_request(&req))
+}
+
 pub fn load_scale_idx() -> usize {
     ls_get(LS_SCALE_IDX)
         .and_then(|s| s.parse::<usize>().ok())

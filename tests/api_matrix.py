@@ -6,6 +6,17 @@ ECHO_PORT = 8099
 BASE = "http://localhost:3000"
 results = []
 
+def _enable_debug_api():
+    # v1.2.0: /debug/* закрыты гейтом; тесты работают по полной поверхности.
+    req = urllib.request.Request(BASE + "/api/debug-mode", data=b'{"on": true}',
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+_enable_debug_api()
+
 # ---------- local echo server ----------
 class Echo(http.server.BaseHTTPRequestHandler):
     def _send(self, code, payload=b"", ctype="application/json", gz=False):
@@ -72,11 +83,11 @@ def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
 
 E = f"http://127.0.0.1:{ECHO_PORT}"
-def P(u): return f"/proxy?url={urllib.parse.quote(u, safe='')}"
+def P(u): return f"/debug/proxy?url={urllib.parse.quote(u, safe='')}"
 import urllib.parse
 
 # ---------- 1. proxy: bad input ----------
-st, _, b = call("GET", "/proxy")
+st, _, b = call("GET", "/debug/proxy")
 check("400 без ?url=", st == 400 and b"Missing" in b)
 st, hdr, b = call("GET", P("ht!tp://%%"))
 check("400 невалидный URL", st == 400, f"code={st}")
@@ -140,7 +151,7 @@ st, hdr, b = call("GET", P("https://ya.ru/"), timeout=20)
 check("внешний GET ya.ru", st == 200 and len(b) > 1000, f"len={len(b)}")
 
 # ---------- 10. API log & x-hop-ui filter ----------
-st, _, b = call("GET", "/api/automation-rules")
+st, _, b = call("GET", "/debug/automation-rules")
 log1 = json.loads(b)
 check("журнал /api/automation-rules", st == 200 and isinstance(log1, list) and len(log1) > 0)
 logged = {(c["method"], c["url"]) for c in log1}
@@ -148,7 +159,7 @@ check("журнал пишет не-UI прокси-вызовы", ("POST", E + 
 check("журнал логирует реальные статусы (нет 0)", all(c["status"] != 0 for c in log1))
 n_before = len(log1)
 call("GET", P(E + "/h"), headers={"x-hop-ui": "1"})
-st, _, b = call("GET", "/api/automation-rules")
+st, _, b = call("GET", "/debug/automation-rules")
 check("x-hop-ui не попадает в журнал", len(json.loads(b)) == n_before)
 
 # ---------- 11. static SPA ----------

@@ -1,10 +1,11 @@
 use leptos::prelude::*;
 use serde_json::{json, Value};
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{window, Headers, Request, RequestInit, Response};
+use web_sys::Response;
 
 use crate::mock_nav::{MockNav, NavKind, NavSel};
+use crate::http_status::{status_label, STATUS_CLASSES};
 
 /// Строка JSON с заменой всех токенов {{...}} на 1: токен вне кавычек —
 /// заглушка-число, токен внутри строки остаётся частью строки.
@@ -98,8 +99,8 @@ fn rules_count_of(p: &Value) -> usize {
 }
 
 async fn fetch_json_get(url: &str) -> Result<Value, String> {
-    let win = window().unwrap();
-    let resp_val = wasm_bindgen_futures::JsFuture::from(win.fetch_with_str(url))
+    let promise = crate::util::ui_fetch(url, None, None)?;
+    let resp_val = wasm_bindgen_futures::JsFuture::from(promise)
         .await
         .map_err(|e| format!("{e:?}"))?;
     let resp: Response = resp_val.dyn_into().map_err(|e| format!("{e:?}"))?;
@@ -115,15 +116,8 @@ async fn fetch_json_get(url: &str) -> Result<Value, String> {
 }
 
 async fn fetch_json_post(url: &str, body: &Value) -> Result<Value, String> {
-    let win = window().unwrap();
-    let init = RequestInit::new();
-    init.set_method("POST");
-    let headers = Headers::new().unwrap();
-    headers.set("Content-Type", "application/json").unwrap();
-    init.set_headers(&headers);
-    init.set_body(&JsValue::from_str(&body.to_string()));
-    let req = Request::new_with_str_and_init(url, &init).unwrap();
-    let resp_val = wasm_bindgen_futures::JsFuture::from(win.fetch_with_request(&req))
+    let promise = crate::util::ui_fetch(url, Some("POST"), Some(&body.to_string()))?;
+    let resp_val = wasm_bindgen_futures::JsFuture::from(promise)
         .await
         .map_err(|e| format!("{e:?}"))?;
     let resp: Response = resp_val.dyn_into().map_err(|e| format!("{e:?}"))?;
@@ -150,24 +144,27 @@ pub fn ProxyView() -> impl IntoView {
     let nav_sel = create_rw_signal(Option::<NavSel>::None);
     // Какое правило сейчас развёрнуто в центре; открыто всегда не больше одного.
     let open_rule = create_rw_signal(Option::<usize>::None);
-    // Инлайн-редактирование имени правила: клик по заголовку карточки
-    // показывает инпут (просьба пользователя 17.11.2026). edit_orig — значение
-    // до правки, для отмены по Escape.
-    let editing_rule = create_rw_signal(Option::<usize>::None);
-    let edit_orig = create_rw_signal(String::new());
     let status_msg = create_rw_signal(String::new());
     let status_err = create_rw_signal(false);
-    let preview_result = create_rw_signal(String::new());
     let new_profile_open = create_rw_signal(false);
     let new_profile_name = create_rw_signal(String::new());
-    // Модалка нового правила: название, тип совпадения и код ответа спрашиваются
-    // до создания (просьба пользователя 17.11.2026).
+    let open_new_profile = move || {
+        new_profile_name.set(String::new());
+        new_profile_open.update(|o| *o = !*o);
+    };
+    crate::debug_bridge::register_click("mock.new_profile", open_new_profile);
+    let snap_panel_id = crate::debug_bridge::register_snapshot("mock_panel", move || {
+        serde_json::json!({
+            "mock_new_profile_open": new_profile_open.try_get().unwrap_or(false),
+            "mock_selected_profile": selected_profile.try_get().flatten(),
+        })
+    });
+    // Модалка нового правила: тип совпадения и код ответа; название правила
+    // ставится автоматически по коду из таблицы статусов REST (17.11.2026).
     let rule_name_open = create_rw_signal(false);
-    let rule_name_draft = create_rw_signal(String::new());
     let rule_method_draft = create_rw_signal("*".to_string());
     let rule_match_draft = create_rw_signal("prefix".to_string());
     let rule_status_draft = create_rw_signal("200".to_string());
-    let rule_name_err = create_rw_signal(false);
     // Порядок списка профилей: по умолчанию история создания; иконки в шапке
     // переключают алфавитный порядок и направление (запрос пользователя 17.11.2026).
     let sort_alpha = create_rw_signal(false);
@@ -177,7 +174,7 @@ pub fn ProxyView() -> impl IntoView {
         let order = if sort_alpha.get() { "alpha" } else { "history" };
         let dir = if sort_desc.get() { "desc" } else { "asc" };
         spawn_local(async move {
-            match fetch_json_get(&format!("/api/mock/profiles?order={order}&dir={dir}")).await {
+            match fetch_json_get(&format!("/debug/mock/profiles?order={order}&dir={dir}")).await {
                 Ok(v) => {
                     if let Some(arr) = v.get("profiles").and_then(|x| x.as_array()) {
                         profiles.set(arr.clone());
@@ -193,7 +190,7 @@ pub fn ProxyView() -> impl IntoView {
 
     let load_profile = move |name: String| {
         spawn_local(async move {
-            match fetch_json_get(&format!("/api/mock/profile?name={}", name)).await {
+            match fetch_json_get(&format!("/debug/mock/profile?name={}", name)).await {
                 Ok(v) => {
                     // успешная загрузка снимает старый статус: после удаления и
                     // повторного создания профиля с тем же именем в панели висело
@@ -211,7 +208,6 @@ pub fn ProxyView() -> impl IntoView {
                     selected_rule_idx.set(None);
                     variants.set(Vec::new());
                     selected_variant_idx.set(None);
-                    preview_result.set(String::new());
                     nav_sel.set(None);
                     open_rule.set(None);
                 }
@@ -223,13 +219,37 @@ pub fn ProxyView() -> impl IntoView {
         });
     };
 
+    // ----- Debug-мост: выбор mock-профиля командами отладочного API -----
+    {
+        let lp = load_profile.clone();
+        let sp = selected_profile.clone();
+        crate::debug_bridge::register_setter("mock.selected", move |v| match v.as_str() {
+            Some(name) if !name.is_empty() => lp(name.to_string()),
+            _ => sp.set(None),
+        });
+        let sp = selected_profile.clone();
+        let snap_mock_id = crate::debug_bridge::register_snapshot("mock", move || serde_json::json!({ "selected": sp.try_get().flatten() }));
+        let sp = selected_profile.clone();
+        let reset_id = crate::debug_bridge::register_reset(move || sp.set(None));
+        // Размонтирование вкладки Mock: убираем все регистрации этой вьюхи.
+        // Иначе снимки и команды читают удалённые сигналы и останавливают
+        // мост (инцидент 18.11.2026: после закрытия Mock встал BROOP).
+        on_cleanup(move || {
+            crate::debug_bridge::unregister_snapshot(snap_panel_id);
+            crate::debug_bridge::unregister_snapshot(snap_mock_id);
+            crate::debug_bridge::unregister_reset(reset_id);
+            crate::debug_bridge::unregister_setter("mock.selected");
+            crate::debug_bridge::unregister_click("mock.new_profile");
+        });
+    }
+
     let save_profile = move || {
         let data = profile_data.get();
         if data.is_null() {
             return;
         }
         spawn_local(async move {
-            match fetch_json_post("/api/mock/profile", &data).await {
+            match fetch_json_post("/debug/mock/profile", &data).await {
                 Ok(_) => {
                     status_msg.set("Профиль сохранён".into());
                     status_err.set(false);
@@ -249,7 +269,7 @@ pub fn ProxyView() -> impl IntoView {
         spawn_local(async move {
             let check = name.clone();
             let body = json!({"name": name});
-            match fetch_json_post("/api/mock/profile/delete", &body).await {
+            match fetch_json_post("/debug/mock/profile/delete", &body).await {
                 Ok(_) => {
                     status_msg.set("Профиль удалён".into());
                     status_err.set(false);
@@ -272,7 +292,7 @@ pub fn ProxyView() -> impl IntoView {
     let start_profile = move |name: String| {
         spawn_local(async move {
             let body = json!({"name": name});
-            match fetch_json_post("/api/mock/start", &body).await {
+            match fetch_json_post("/debug/mock/start", &body).await {
                 Ok(v) => {
                     let port = v.get("port").and_then(|x| x.as_u64()).unwrap_or(0);
                     status_msg.set(format!("Запущен на порту {}", port));
@@ -290,7 +310,7 @@ pub fn ProxyView() -> impl IntoView {
     let stop_profile = move |name: String| {
         spawn_local(async move {
             let body = json!({"name": name});
-            match fetch_json_post("/api/mock/stop", &body).await {
+            match fetch_json_post("/debug/mock/stop", &body).await {
                 Ok(_) => {
                     status_msg.set("Остановлен".into());
                     status_err.set(false);
@@ -321,7 +341,7 @@ pub fn ProxyView() -> impl IntoView {
             "rules": []
         });
         spawn_local(async move {
-            match fetch_json_post("/api/mock/profile", &new_profile).await {
+            match fetch_json_post("/debug/mock/profile", &new_profile).await {
                 Ok(_) => {
                     new_profile_open.set(false);
                     new_profile_name.set(String::new());
@@ -346,7 +366,6 @@ pub fn ProxyView() -> impl IntoView {
             .unwrap_or_default();
         variants.set(vars);
         selected_variant_idx.set(None);
-        preview_result.set(String::new());
         nav_sel.set(Some(NavSel {
             kind: NavKind::Match,
             rule: idx,
@@ -364,11 +383,13 @@ pub fn ProxyView() -> impl IntoView {
 
     // Правило создаётся из модалки: название, метод, тип совпадения и код
     // ответа задаёт пользователь (17.11.2026).
-    let add_rule = move |name: String, method: String, match_type: String, status: u64| {
+    let add_rule = move |method: String, match_type: String, status: u64| {
+        // Название — автоматически по коду из таблицы статусов REST.
+        let label = status_label(status);
         let mut r = rules.get();
         let new_rule = json!({
             "id": format!("r{}", r.len() + 1),
-            "label": name,
+            "label": label.clone(),
             "method": method,
             "match": match_type,
             "path": "/api/",
@@ -377,7 +398,7 @@ pub fn ProxyView() -> impl IntoView {
             "cycle": false,
             "variants": [{
                 "id": "v1",
-                "label": "OK",
+                "label": label,
                 "status": status,
                 "json": "{}",
                 "randomize": false,
@@ -401,14 +422,9 @@ pub fn ProxyView() -> impl IntoView {
         open_rule.set(Some(new_idx));
     };
 
-    // Сохранение модалки нового правила: пустое название не выпускаем,
-    // код ответа берём из поля, по умолчанию 200.
+    // Сохранение модалки нового правила: код ответа берём из поля, по
+    // умолчанию 200; название подставляется автоматически по коду.
     let save_rule_draft = move || {
-        let name = rule_name_draft.get().trim().to_string();
-        if name.is_empty() {
-            rule_name_err.set(true);
-            return;
-        }
         let match_type = rule_match_draft.get();
         let method = rule_method_draft.get();
         let status = rule_status_draft
@@ -419,7 +435,7 @@ pub fn ProxyView() -> impl IntoView {
             .filter(|s| (100..600).contains(s))
             .unwrap_or(200);
         rule_name_open.set(false);
-        add_rule(name, method, match_type, status);
+        add_rule(method, match_type, status);
     };
 
     let delete_rule = move |idx: usize| {
@@ -460,7 +476,7 @@ pub fn ProxyView() -> impl IntoView {
                 let vid = format!("v{}", n + 1);
                 let new_var = json!({
                     "id": vid,
-                    "label": format!("Вариант {}", n + 1),
+                    "label": status_label(200),
                     "status": 200,
                     "json": "{}",
                     "randomize": false,
@@ -573,35 +589,6 @@ pub fn ProxyView() -> impl IntoView {
         }
     };
 
-    let preview_variant = move || {
-        if let Some(vidx) = selected_variant_idx.get() {
-            let vars = variants.get();
-            if let Some(var) = vars.get(vidx) {
-                let json_str = var
-                    .get("json")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("{}")
-                    .to_string();
-                let randomize = var
-                    .get("randomize")
-                    .and_then(|x| x.as_bool())
-                    .unwrap_or(false);
-                spawn_local(async move {
-                    let body = json!({"json": json_str, "randomize": randomize});
-                    match fetch_json_post("/api/mock/preview", &body).await {
-                        Ok(v) => {
-                            if let Some(text) = v.get("text").and_then(|x| x.as_str()) {
-                                preview_result.set(text.into());
-                            }
-                        }
-                        Err(e) => {
-                            preview_result.set(format!("Ошибка: {}", e));
-                        }
-                    }
-                });
-            }
-        }
-    };
 
     let _on_profile_change = move |ev: web_sys::Event| {
         let val = input_value(ev);
@@ -661,15 +648,15 @@ pub fn ProxyView() -> impl IntoView {
         update_rule_field(idx, "cycle", Value::Bool(val));
     };
 
-    let on_variant_label_change = move |vidx: usize, ev: web_sys::Event| {
-        let val = input_value(ev);
-        update_variant_field(vidx, "label", Value::String(val));
-    };
-
     let on_variant_status_change = move |vidx: usize, ev: web_sys::Event| {
-        let val = input_value(ev);
+        let val = select_value(ev);
         if let Ok(s) = val.parse::<u16>() {
             update_variant_field(vidx, "status", Value::Number(s.into()));
+            // Название варианта и правила — автоматически по коду из таблицы.
+            update_variant_field(vidx, "label", Value::String(status_label(s as u64)));
+            if let Some(ridx) = selected_rule_idx.get() {
+                update_rule_field(ridx, "label", Value::String(status_label(s as u64)));
+            }
         }
     };
 
@@ -727,12 +714,10 @@ pub fn ProxyView() -> impl IntoView {
         |title: &'static str| -> AnyView { view! { <div class="px-h">{title}</div> }.into_any() };
     let pick_cb: Callback<NavSel> = Callback::new(move |sel: NavSel| pick(sel));
     let add_rule_cb: Callback<()> = Callback::new(move |_: ()| {
-        // «+» открывает модалку с названием, типом и кодом (17.11.2026).
-        rule_name_draft.set(String::new());
+        // «+» открывает модалку с типом и кодом; название — по коду (17.11.2026).
         rule_method_draft.set("*".to_string());
         rule_match_draft.set("prefix".to_string());
         rule_status_draft.set("200".to_string());
-        rule_name_err.set(false);
         rule_name_open.set(true);
     });
     let connect_block = move || -> AnyView {
@@ -741,24 +726,24 @@ pub fn ProxyView() -> impl IntoView {
                 {block_head("Соединение")}
                 <div class="px-field">
                     <label class="px-label">"Имя"</label>
-                    <input class="px-input" type="text" readonly=true
+                    <input data-bh="mock.name" class="px-input" type="text" readonly=true
                         prop:value=move || profile_data.get().get("name").and_then(|x| x.as_str()).unwrap_or("").to_string() />
                 </div>
                 <div class="px-grid2">
                     <div class="px-field">
                         <label class="px-label">"Порт"</label>
-                        <input class="px-input" type="number" min="1" max="65535"
+                        <input data-bh="mock.listen_port" class="px-input" type="number" min="1" max="65535"
                             prop:value=move || profile_data.get().get("listen_port").and_then(|x| x.as_u64()).unwrap_or(0).to_string()
                             on:input=on_port_change />
                     </div>
                     <div class="px-field">
                         <label class="px-label">"Upstream (опционально)"</label>
-                        <input class="px-input" type="text" placeholder="http://127.0.0.1:8080"
+                        <input data-bh="mock.upstream" class="px-input" type="text" placeholder="http://127.0.0.1:8080"
                             prop:value=move || profile_data.get().get("upstream").and_then(|x| x.as_str()).unwrap_or("").to_string()
                             on:input=on_upstream_change />
                     </div>
                 </div>
-                <button class="px-btn primary" on:click=move |_| save_profile()>"Сохранить"</button>
+                <button data-bh="mock.save_profile" class="px-btn primary" on:click=move |_| save_profile()>"Сохранить"</button>
             </div>
         }.into_any()
     };
@@ -798,7 +783,7 @@ pub fn ProxyView() -> impl IntoView {
                 <div class="px-h-row">
                     // В шапке только иконка «+»: слово убрано по просьбе
                     // пользователя 17.11.2026, смысл подсказывает тултип при наведении.
-                    <button class="px-mini" data-tip="Добавить правило" aria-label="Добавить правило"
+                    <button data-bh="mock.add_rule" class="px-mini" data-tip="Добавить правило" aria-label="Добавить правило"
                         on:click=move |_| { ar_h.run(()); }><IconPlus /></button>
                 </div>
                 <div class="mrules">
@@ -815,85 +800,32 @@ pub fn ProxyView() -> impl IntoView {
                             let sp2 = save_profile.clone();
                             let navav2 = nav_add_variant.clone();
                             view! {
-                                <details class="mrule"
-                                    open=move || om.get() == Some(ri)
-                                    on:click=move |ev| {
-                                        // Браузер переключает details после обработчика:
-                                        // state до клика = какое состояние выставить в сигнал.
-                                        let Some(t) = ev.target() else { return };
-                                        let Some(el) = t.dyn_ref::<web_sys::Element>() else { return };
-                                        // Клик по заголовку имени — инлайн-правка, карточку не трогаем.
-                                        if el.closest(".mr-title").ok().flatten().is_some() { return; }
-                                        let Ok(Some(sum)) = el.closest("summary") else { return };
-                                        let det = match sum.parent_element()
-                                            .and_then(|p| p.dyn_into::<web_sys::HtmlDetailsElement>().ok())
-                                        {
-                                            Some(d) => d,
-                                            None => return,
-                                        };
-                                        if det.open() {
+                                <details data-bh=format!("rule.row.{ri}") class="mrule"
+                                    open=move || om.get() == Some(ri)>
+                                    <summary class="mr-sum"
+                                        on:click=move |ev| {
+                                        // Единственный источник истины — сигнал `open_rule`.
+                                        // Нативный toggle браузера гасим: иначе он и реактивный
+                                        // эффект тянут `open` по очереди и нужен двойной-тройной клик.
+                                        ev.prevent_default();
+                                        if om.get() == Some(ri) {
                                             om.set(None);
                                         } else {
                                             sr2(ri);
                                             om.set(Some(ri));
                                         }
                                     }>
-                                    <summary class="mr-sum">
                                         <svg class="mr-chev" aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                             <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
-                                        <span class="mr-title"
-                                            on:click=move |ev| {
-                                                // Первый клик по имени: гасим переключение карточки
-                                                // и показываем инпут вместо текста.
-                                                ev.prevent_default();
-                                                if editing_rule.get() == Some(ri) { return; }
-                                                let lab = rules.get()
-                                                    .get(ri)
-                                                    .and_then(|r| r.get("label").and_then(|x| x.as_str().map(String::from)))
-                                                    .unwrap_or_default();
-                                                edit_orig.set(lab);
-                                                editing_rule.set(Some(ri));
-                                            }>
-                                            {move || {
-                                                if editing_rule.get() == Some(ri) {
-                                                    let name_ref = create_node_ref::<leptos::html::Input>();
-                                                    // autofocus на вставке элемента ненадёжен,
-                                                    // фокус ставим явно (паттерн app.rs:1079).
-                                                    create_effect(move |_| {
-                                                        if let Some(el) = name_ref.get() {
-                                                            let _ = el.focus();
-                                                            el.select();
-                                                        }
-                                                    });
-                                                    view! {
-                                                        <input class="mr-name-input" type="text"
-                                                            node_ref=name_ref
-                                                            prop:value=move || rfield(ri, "label").and_then(|x| x.as_str().map(String::from)).unwrap_or_default()
-                                                            on:input=move |ev| update_rule_field(ri, "label", Value::String(input_value(ev)))
-                                                            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                                                if ev.key() == "Enter" {
-                                                                    editing_rule.set(None);
-                                                                } else if ev.key() == "Escape" {
-                                                                    update_rule_field(ri, "label", Value::String(edit_orig.get()));
-                                                                    editing_rule.set(None);
-                                                                }
-                                                            }
-                                                            on:blur=move |_| editing_rule.set(None) />
-                                                    }.into_any()
-                                                } else {
-                                                    view! { <span class="mr-title-text">{move || {
-                                                        let rs = rules.get();
-                                                        match rs.get(ri) {
-                                                            Some(r) => {
-                                                                let lab = r.get("label").and_then(|x| x.as_str()).unwrap_or("");
-                                                                if lab.is_empty() { format!("Правило {}", ri + 1) } else { lab.to_string() }
-                                                            }
-                                                            None => String::new(),
-                                                        }
-                                                    }}</span> }.into_any()
-                                                }
-                                            }}
+                                        <span class="mr-title">
+                                            <span class="mr-method">{move || rfield(ri, "method").and_then(|x| x.as_str().map(String::from)).unwrap_or_else(|| "*".to_string())}</span>
+                                            <span class="mr-path">{move || rfield(ri, "path").and_then(|x| x.as_str().map(String::from)).unwrap_or_else(|| "/".to_string())}</span>
+                                            <span class="mr-sep" aria-hidden="true">"|"</span>
+                                            <span class="mr-variants-count">{move || {
+                                                let n = rfield(ri, "variants").and_then(|x| x.as_array().map(|a| a.len())).unwrap_or(0);
+                                                format!("вариантов ответа — {n}")
+                                            }}</span>
                                         </span>
                                         <span class="mr-tail">{move || {
                                             let rs = rules.get();
@@ -910,7 +842,7 @@ pub fn ProxyView() -> impl IntoView {
                                         <div class="px-grid2">
                                             <div class="px-field">
                                                 <label class="px-label">"Method"</label>
-                                                <select class="px-input"
+                                                <select data-bh=format!("rule.method.{ri}") class="px-input"
                                                     prop:value=move || rfield(ri, "method").and_then(|x| x.as_str().map(String::from)).unwrap_or_else(|| "*".to_string())
                                                     on:change=move |ev| on_rule_method_change(ri, ev)>
                                                     <option value="*" selected=move || opt_is(ri, "method", "*")>"*"</option>
@@ -923,7 +855,7 @@ pub fn ProxyView() -> impl IntoView {
                                             </div>
                                             <div class="px-field">
                                                 <label class="px-label">"Match"</label>
-                                                <select class="px-input"
+                                                <select data-bh=format!("rule.match.{ri}") class="px-input"
                                                     prop:value=move || rfield(ri, "match").and_then(|x| x.as_str().map(String::from)).unwrap_or_else(|| "prefix".to_string())
                                                     on:change=move |ev| on_rule_match_change(ri, ev)>
                                                     <option value="exact" selected=move || opt_is(ri, "match", "exact")>"exact"</option>
@@ -933,19 +865,19 @@ pub fn ProxyView() -> impl IntoView {
                                         </div>
                                         <div class="px-field">
                                             <label class="px-label">"Path"</label>
-                                            <input class="px-input" type="text"
+                                            <input data-bh=format!("rule.path.{ri}") class="px-input" type="text"
                                                 prop:value=move || rfield(ri, "path").and_then(|x| x.as_str().map(String::from)).unwrap_or_default()
                                                 on:input=move |ev| on_rule_path_change(ri, ev) />
                                         </div>
                                         <div class="mr-checks">
                                             <label class="px-check-label">
-                                                <input type="checkbox" class="px-check"
+                                                <input data-bh=format!("rule.enabled.{ri}") type="checkbox" class="px-check"
                                                     prop:checked=move || rfield(ri, "enabled").and_then(|x| x.as_bool()).unwrap_or(true)
                                                     on:change=move |ev| on_rule_enabled_change(ri, ev) />
                                                 "Включено"
                                             </label>
                                             <label class="px-check-label">
-                                                <input type="checkbox" class="px-check"
+                                                <input data-bh=format!("rule.cycle.{ri}") type="checkbox" class="px-check"
                                                     prop:checked=move || rfield(ri, "cycle").and_then(|x| x.as_bool()).unwrap_or(false)
                                                     on:change=move |ev| on_rule_cycle_change(ri, ev) />
                                                 "Циклически"
@@ -953,7 +885,7 @@ pub fn ProxyView() -> impl IntoView {
                                         </div>
                                         <div class="px-h-row">
                                             <div class="px-h">"Варианты ответа"</div>
-                                            <button class="px-mini" title="Новый вариант" aria-label="Новый вариант"
+                                            <button data-bh=format!("rule.new_variant.{ri}") class="px-mini" title="Новый вариант" aria-label="Новый вариант"
                                                 on:click=move |_| { navav2(ri); }><IconPlus /></button>
                                         </div>
                                         <Show when=move || {
@@ -982,11 +914,14 @@ pub fn ProxyView() -> impl IntoView {
                                                     let sv2 = select_variant.clone();
                                                     let dv2 = delete_variant.clone();
                                                     view! {
-                                                        <details class="mvar"
-                                                            open=move || selected_rule_idx.get() == Some(ri) && selected_variant_idx.get() == Some(vi)
-                                                            on:click=move |ev| {
+                                                        <details data-bh=format!("variant.row.{ri}.{vi}") class="mvar"
+                                                            open=move || selected_rule_idx.get() == Some(ri) && selected_variant_idx.get() == Some(vi)>
+                                                            <summary class="mv-sum"
+                                                                on:click=move |ev| {
                                                                 let Some(t) = ev.target() else { return };
                                                                 let Some(el) = t.dyn_ref::<web_sys::Element>() else { return };
+                                                                // Кнопка-переключатель внутри строки не должна схлопывать редактор.
+                                                                if let Ok(Some(_)) = el.closest("button") { return; }
                                                                 let Ok(Some(sum)) = el.closest("summary") else { return };
                                                                 let det = match sum.parent_element()
                                                                     .and_then(|p| p.dyn_into::<web_sys::HtmlDetailsElement>().ok())
@@ -1003,7 +938,6 @@ pub fn ProxyView() -> impl IntoView {
                                                                     sv2(vi);
                                                                 }
                                                             }>
-                                                            <summary class="mv-sum">
                                                                 <svg class="mr-chev" aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none">
                                                                     <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                                                                 </svg>
@@ -1019,71 +953,98 @@ pub fn ProxyView() -> impl IntoView {
                                                                             .and_then(|r| r.get("active_variant").and_then(|x| x.as_str()).map(String::from))
                                                                             .unwrap_or_default();
                                                                         let vid = vfield(ri, vi, "id").and_then(|x| x.as_str().map(String::from)).unwrap_or_default();
-                                                                        if !act.is_empty() && act == vid {
-                                                                            view! { <span class="mv-active">"активный"</span> }.into_any()
-                                                                        } else {
-                                                                            view! { <div></div> }.into_any()
-                                                                        }
+                                                                        let on = !act.is_empty() && act == vid;
+                                                                        view! {
+                                                                            <button data-bh=format!("variant.activate.{ri}.{vi}") class={if on { "mv-active on" } else { "mv-active off" }}
+                                                                                on:click={move |e| {
+                                                                                    e.prevent_default();
+                                                                                    e.stop_propagation();
+                                                                                    let mut r = rules.get();
+                                                                                    if let Some(ro) = r.get_mut(ri).and_then(|x| x.as_object_mut()) {
+                                                                                        let nv = if on { String::new() } else { vid.clone() };
+                                                                                        ro.insert("active_variant".into(), Value::String(nv));
+                                                                                    }
+                                                                                    rules.set(r.clone());
+                                                                                    update_profile_rules(r);
+                                                                                }}>{if on { "активный" } else { "активировать" }}</button>
+                                                                        }.into_any()
                                                                     }}
-                                                                    <span class="mv-status">{move || {
-                                                                        vfield(ri, vi, "status").and_then(|x| x.as_u64()).map(|x| x.to_string()).unwrap_or_else(|| "—".to_string())
-                                                                    }}</span>
                                                                 </span>
                                                             </summary>
                                                             <div class="mv-body">
-                                                                <div class="px-field">
-                                                                    <label class="px-label">"Label"</label>
-                                                                    <input class="px-input" type="text"
-                                                                        prop:value=move || vfield(ri, vi, "label").and_then(|x| x.as_str().map(String::from)).unwrap_or_default()
-                                                                        on:input=move |ev| on_variant_label_change(vi, ev) />
-                                                                </div>
-                                                                <div class="px-grid2">
+                                                                <div class="px-ctl-row">
                                                                     <div class="px-field">
                                                                         <label class="px-label">"Status"</label>
-                                                                        <input class="px-input" type="number" min="100" max="599"
-                                                                            prop:value=move || vfield(ri, vi, "status").and_then(|x| x.as_u64()).unwrap_or(200).to_string()
-                                                                            on:input=move |ev| on_variant_status_change(vi, ev) />
+                                                                        <select data-bh=format!("variant.status.{ri}.{vi}") class="px-input"
+                                                                            on:change=move |ev| on_variant_status_change(vi, ev)>
+                                                                            {STATUS_CLASSES
+                                                                                .iter()
+                                                                                .map(|cls| {
+                                                                                    view! { <optgroup label=cls.title>{
+                                                                                        cls.codes
+                                                                                            .iter()
+                                                                                            .map(|(code, _phrase)| {
+                                                                                                let cur = code.to_string();
+                                                                                                view! {
+                                                                                                    <option
+                                                                                                        value=cur.clone()
+                                                                                                        selected=move || {
+                                                                                                            vfield(ri, vi, "status").and_then(|x| x.as_u64()).map(|s| s.to_string()) == Some(cur.clone())
+                                                                                                        }
+                                                                                                    >{{code.to_string()}}</option>
+                                                                                                }
+                                                                                            })
+                                                                                            .collect::<Vec<_>>()
+                                                                                    }</optgroup> }
+                                                                                })
+                                                                                .collect::<Vec<_>>()}
+                                                                        </select>
                                                                     </div>
                                                                     <div class="px-field">
                                                                         <label class="px-label">"Delay ms"</label>
-                                                                        <input class="px-input" type="number" min="0"
-                                                                            prop:value=move || vfield(ri, vi, "delay_ms").and_then(|x| x.as_u64()).unwrap_or(0).to_string()
-                                                                            on:input=move |ev| on_variant_delay_change(vi, ev) />
+                                                                        <div class="px-stepper">
+                                                                         <button data-bh=format!("variant.delay_down.{ri}.{vi}") class="px-step-btn" type="button" aria-label="Меньше"
+                                                                             on:click=move |_| {
+    let cur = vfield(ri, vi, "delay_ms").and_then(|x| x.as_u64()).unwrap_or(0);
+    update_variant_field(vi, "delay_ms", Value::Number(cur.saturating_sub(100).into()));
+}>
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+</button>
+                                                                         <input data-bh=format!("variant.delay.{ri}.{vi}") class="px-step-val" type="number" min="0" max="600000" step="100"
+                                                                             title="Кликни по числу и впиши сам"
+                                                                             prop:value=move || vfield(ri, vi, "delay_ms").and_then(|x| x.as_u64()).unwrap_or(0).to_string()
+                                                                             on:input=move |ev| on_variant_delay_change(vi, ev) />
+                                                                         <button data-bh=format!("variant.delay_up.{ri}.{vi}") class="px-step-btn" type="button" aria-label="Больше"
+                                                                             on:click=move |_| {
+    let cur = vfield(ri, vi, "delay_ms").and_then(|x| x.as_u64()).unwrap_or(0);
+    update_variant_field(vi, "delay_ms", Value::Number(cur.saturating_add(100).min(600_000).into()));
+}>
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+</button>
+                                                                        </div>
                                                                     </div>
                                                                 </div>
-                                                                <div class="px-field">
+                                                                <div class="px-field px-check-field">
                                                                     <label class="px-check-label">
-                                                                        <input type="checkbox" class="px-check"
+                                                                        <input data-bh=format!("variant.randomize.{ri}.{vi}") type="checkbox" class="px-check"
                                                                             prop:checked=move || vfield(ri, vi, "randomize").and_then(|x| x.as_bool()).unwrap_or(false)
                                                                             on:change=move |ev| on_variant_randomize_change(vi, ev) />
                                                                         "Рандомизировать {{...}}"
                                                                     </label>
                                                                 </div>
-                                                                <details class="px-help">
+<div class="px-field">
+                                                                    <div class="px-json-head"><label class="px-label">"JSON Body"</label><details class="px-help">
                                                                     <summary>"Синтаксис {{токенов}}"</summary>
                                                                     <pre class="px-help-list">{r#"{{guid}}  {{bool}}  {{int:MIN:MAX}}  {{float:MIN:MAX:DEC}}
 {{string:N}}  {{hex:N}}  {{email}}  {{phone}}  {{inn}}  {{snils}}
 {{name}}  {{date:ДНЕЙ_СДВИГ}}  {{datetime:ДНЕЙ_СДВИГ}}  {{pick:A|B|C}}"#}</pre>
-                                                                </details>
-                                                                <div class="px-field">
-                                                                    <label class="px-label">"JSON Body"</label>
-                                                                    <textarea class="px-json" rows="14"
+                                                                </details></div>
+                                                                    <textarea data-bh=format!("variant.json.{ri}.{vi}") class="px-json" rows="14"
                                                                         prop:value=move || vfield(ri, vi, "json").and_then(|x| x.as_str().map(String::from)).unwrap_or_else(|| "{}".to_string())
                                                                         on:input=move |ev| on_variant_json_change(vi, ev) />
                                                                 </div>
-                                                                <div class="px-grid2">
-                                                                    <button class="px-btn primary" on:click=move |_| preview_variant()>"Предпросмотр"</button>
-                                                                    <button class="px-btn" on:click=move |_| { sv2(vi); }>"Сделать активным"</button>
-                                                                </div>
-                                                                <div class="px-grid2">
-                                                                    <button class="px-btn" on:click=move |_| { dv2(vi); }>"Удалить вариант"</button>
-                                                                </div>
-                                                                <Show when=move || !preview_result.get().is_empty() fallback=move || { view! { <div></div> } }>
-                                                                    <div class="px-field">
-                                                                        <label class="px-label">"Результат предпросмотра"</label>
-                                                                        <textarea class="px-json" rows="6" readonly=true prop:value=move || preview_result.get() />
-                                                                    </div>
-                                                                </Show>
+                                                                <div class="px-btn-row">
+                                                                    <button data-bh=format!("variant.make_active.{ri}.{vi}") class="px-btn" on:click=move |_| { sv2(vi); }>"Сделать активным"</button><button data-bh=format!("variant.delete.{ri}.{vi}") class="px-btn" on:click=move |_| { dv2(vi); }>"Удалить вариант"</button></div>
                                                             </div>
                                                         </details>
                                                     }.into_any()
@@ -1091,8 +1052,8 @@ pub fn ProxyView() -> impl IntoView {
                                             />
                                         </div>
                                         <div class="px-grid2">
-                                            <button class="px-btn primary" on:click=move |_| { sp2(); }>"Сохранить профиль"</button>
-                                            <button class="px-btn" on:click=move |_| { dr2(ri); }>"Удалить правило"</button>
+                                            <button data-bh="rule.save" class="px-btn primary" on:click=move |_| { sp2(); }>"Сохранить профиль"</button>
+                                            <button data-bh=format!("rule.delete.{ri}") class="px-btn" on:click=move |_| { dr2(ri); }>"Удалить правило"</button>
                                         </div>
                                     </div>
                                 </details>
@@ -1110,7 +1071,7 @@ pub fn ProxyView() -> impl IntoView {
                 <div class="px-h-row">
                     <div class="px-h">Профили</div>
                     <div class="px-h-tools">
-                        <button class="px-mini tip-right"
+                        <button data-bh="sidebar.sort_desc" class="px-mini tip-right"
                             data-tip=move || if sort_desc.get() { "По возрастанию" } else { "По убыванию" }
                             aria-label="Направление порядка"
                             on:click=move |_| {
@@ -1123,7 +1084,7 @@ pub fn ProxyView() -> impl IntoView {
                                 view! { <IconArrowDown /> }.into_any()
                             }}
                         </button>
-                        <button class=move || if sort_alpha.get() { "px-mini tip-right on" } else { "px-mini tip-right" }
+                        <button data-bh="sidebar.sort_alpha" class=move || if sort_alpha.get() { "px-mini tip-right on" } else { "px-mini tip-right" }
                             data-tip=move || if sort_alpha.get() { "Порядок истории создания" } else { "Порядок по алфавиту" }
                             aria-label="Порядок списка"
                             on:click=move |_| {
@@ -1132,18 +1093,15 @@ pub fn ProxyView() -> impl IntoView {
                             }>
                             <IconAlpha />
                         </button>
-                        <button class="px-mini tip-right" data-tip="Создать профиль" aria-label="Создать профиль"
-                            on:click=move |_| {
-                                new_profile_name.set(String::new());
-                                new_profile_open.update(|o| *o = !*o);
-                            }>
+                        <button data-bh="sidebar.new_profile" class="px-mini tip-right" data-tip="Создать профиль" aria-label="Создать профиль"
+                            on:click=move |_| open_new_profile()>
                             <IconPlus />
                         </button>
                     </div>
                 </div>
                 <Show when=move || new_profile_open.get()>
                     <div class="px-field">
-                        <input class="px-input" type="text" placeholder="profile-name"
+                        <input data-bh="profile.new_name" class="px-input" type="text" placeholder="profile-name"
                             autofocus=true
                             prop:value=move || new_profile_name.get()
                             on:input=move |ev| new_profile_name.set(input_value(ev))
@@ -1151,8 +1109,8 @@ pub fn ProxyView() -> impl IntoView {
                                 if ev.key() == "Enter" { create_profile(); }
                             } />
                         <div style="display:flex;gap:6px;margin-top:6px">
-                            <button class="px-btn" on:click=move |_| create_profile()>"Создать"</button>
-                            <button class="px-btn" on:click=move |_| new_profile_open.set(false)>"Отмена"</button>
+                            <button data-bh="profile.create" class="px-btn" on:click=move |_| create_profile()>"Создать"</button>
+                            <button data-bh="profile.create_cancel" class="px-btn" on:click=move |_| new_profile_open.set(false)>"Отмена"</button>
                         </div>
                     </div>
                 </Show>
@@ -1182,12 +1140,15 @@ pub fn ProxyView() -> impl IntoView {
                             let name_click = name.clone();
                             let name_del = name.clone();
                             let name_pp = name.clone();
+                            let bh_row = format!("profile.row.{name}");
+                            let bh_pp = format!("profile.start_stop.{name}");
+                            let bh_del = format!("profile.delete.{name}");
                             view! {
-                                <div class=item_cls
+                                <div data-bh=bh_row class=item_cls
                                     on:click=move |_| load_profile(name_click.clone())>
                                     <span class=dot_cls></span>
                                     <span class="px-name">{name}</span>
-                                    <button class=pp_cls title=pp_title
+                                    <button data-bh=bh_pp class=pp_cls title=pp_title
                                         on:click=move |e| {
                                             e.stop_propagation();
                                             if running {
@@ -1204,7 +1165,7 @@ pub fn ProxyView() -> impl IntoView {
                                             }}
                                         </svg>
                                     </button>
-                                    <button class="px-del" title="Удалить профиль"
+                                    <button data-bh=bh_del class="px-del" title="Удалить профиль"
                                         on:click=move |e| {
                                             e.stop_propagation();
                                             del_profile_confirm.set(Some(name_del.clone()));
@@ -1232,13 +1193,13 @@ pub fn ProxyView() -> impl IntoView {
                                 format!("Удалить профиль «{name}»?")
                             }}</div>
                             <div class="modal-actions">
-                                <button class="modal-save danger" on:click=move |_| {
+                                <button data-bh="modal.del_profile_confirm" class="modal-save danger" on:click=move |_| {
                                     if let Some(name) = del_profile_confirm.get() {
                                         delete_profile(name);
                                     }
                                     del_profile_confirm.set(None);
                                 }>"Удалить"</button>
-                                <button class="modal-cancel" on:click=move |_| del_profile_confirm.set(None)>"Отмена"</button>
+                                <button data-bh="modal.del_profile_cancel" class="modal-cancel" on:click=move |_| del_profile_confirm.set(None)>"Отмена"</button>
                             </div>
                         </div>
                     </div>
@@ -1259,42 +1220,50 @@ pub fn ProxyView() -> impl IntoView {
                         }>
                         <div class="modal">
                             <div class="modal-title">"Новое правило"</div>
-                            <input class="modal-input" type="text" placeholder="Название правила"
-                                autofocus=true
-                                prop:value=move || rule_name_draft.get()
-                                on:input=move |ev| { rule_name_draft.set(input_value(ev)); rule_name_err.set(false); }
-                                on:keydown=move |ev| { if ev.key() == "Enter" { save_rule_draft(); } } />
-                            <Show when=move || rule_name_err.get()>
-                                <div class="modal-err">"Укажите название правила"</div>
-                            </Show>
                             <div class="modal-hint">"Метод запроса"</div>
-                            <select class="modal-input"
-                                prop:value=move || rule_method_draft.get()
+                            <select data-bh="modal.rule_method" class="modal-input"
                                 on:change=move |ev| {
                                     rule_method_draft.set(select_value(ev));
                                 }>
-                                <option value="*">"* (любой метод)"</option>
-                                <option value="GET">"GET"</option>
-                                <option value="POST">"POST"</option>
-                                <option value="PUT">"PUT"</option>
-                                <option value="PATCH">"PATCH"</option>
-                                <option value="DELETE">"DELETE"</option>
+                                <option value="*" selected=move || rule_method_draft.get() == "*">"* (любой метод)"</option>
+                                <option value="GET" selected=move || rule_method_draft.get() == "GET">"GET"</option>
+                                <option value="POST" selected=move || rule_method_draft.get() == "POST">"POST"</option>
+                                <option value="PUT" selected=move || rule_method_draft.get() == "PUT">"PUT"</option>
+                                <option value="PATCH" selected=move || rule_method_draft.get() == "PATCH">"PATCH"</option>
+                                <option value="DELETE" selected=move || rule_method_draft.get() == "DELETE">"DELETE"</option>
                             </select>
                             <div class="modal-hint">"Тип совпадения"</div>
-                            <select class="modal-input"
-                                prop:value=move || rule_match_draft.get()
+                            <select data-bh="modal.rule_match" class="modal-input"
                                 on:change=move |ev| rule_match_draft.set(select_value(ev))>
-                                <option value="exact">"exact (точное совпадение пути)"</option>
-                                <option value="prefix">"prefix (по префиксу пути)"</option>
+                                <option value="exact" selected=move || rule_match_draft.get() == "exact">"exact (точное совпадение пути)"</option>
+                                <option value="prefix" selected=move || rule_match_draft.get() == "prefix">"prefix (по префиксу пути)"</option>
                             </select>
-                            <div class="modal-hint">"Код ответа, например 200"</div>
-                            <input class="modal-input" type="number" min="100" max="599" placeholder="200"
-                                prop:value=move || rule_status_draft.get()
-                                on:input=move |ev| rule_status_draft.set(input_value(ev))
-                                on:keydown=move |ev| { if ev.key() == "Enter" { save_rule_draft(); } } />
+                            <div class="modal-hint">"Код ответа — название правила подставится автоматически"</div>
+                            <select data-bh="modal.rule_status" class="modal-input"
+                                on:change=move |ev| rule_status_draft.set(select_value(ev))>
+                                {STATUS_CLASSES
+                                    .iter()
+                                    .map(|cls| {
+                                        view! { <optgroup label=cls.title>{
+                                            cls.codes
+                                                .iter()
+                                                .map(|(code, _phrase)| {
+                                                    let cur = code.to_string();
+                                                    view! {
+                                                        <option
+                                                            value=cur.clone()
+                                                            selected=move || rule_status_draft.get() == cur
+                                                        >{{code.to_string()}}</option>
+                                                    }
+                                                })
+                                                .collect::<Vec<_>>()
+                                        }</optgroup> }
+                                    })
+                                    .collect::<Vec<_>>()}
+                            </select>
                             <div class="modal-actions">
-                                <button class="modal-save" on:click=move |_| save_rule_draft()>"Добавить"</button>
-                                <button class="modal-cancel" on:click=move |_| rule_name_open.set(false)>"Отмена"</button>
+                                <button data-bh="modal.rule_add" class="modal-save" on:click=move |_| save_rule_draft()>"Добавить"</button>
+                                <button data-bh="modal.rule_cancel" class="modal-cancel" on:click=move |_| rule_name_open.set(false)>"Отмена"</button>
                             </div>
                         </div>
                     </div>

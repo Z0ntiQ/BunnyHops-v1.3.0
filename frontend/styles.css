@@ -1766,11 +1766,15 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 .modal-hint { color: var(--text-dim); font-size: var(--fs-label); margin: var(--space-1) 0 var(--space-3); }
 
 /* ---------- журнал действий: спойлер в правом нижнем углу ---------- */
-.actlog-toggle {
+.bottom-dock {
   position: fixed;
   right: 10px;
   bottom: 8px;
   z-index: 41;
+  display: flex;
+  gap: var(--space-2);
+}
+.actlog-toggle {
   padding: var(--space-1) var(--space-3);
   font-size: var(--fs-caption);
   border-radius: var(--radius-control);
@@ -1827,24 +1831,102 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 .actlog-line { white-space: pre; }
 
 /* ===== Mock (BunnyProx) — px-* классы ===== */
-.px-layout { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
+.px-layout { display: grid; grid-template-columns: 220px 1fr 300px; height: 100%; }
+.px-nav-col { border-left: 1px solid var(--border); background: var(--bg); overflow-y: auto; }
+/* Правая колонка навигации по настройкам: тот же язык, что у сайдбара профилей. */
+.px-nav { padding: var(--space-4); height: 100%; overflow-y: auto; }
+.mnav-item { display: flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-3); margin: var(--space-1) 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg-raised); font-size: var(--fs-label); color: var(--text); cursor: pointer; }
+.mnav-item:hover { background: var(--bg); border-color: var(--accent); }
+.mnav-item.active { background: var(--accent-dim); color: var(--accent); }
+.mnav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Заголовок группы: подпись как px-h, справа кнопка добавления. */
+.mnav-group { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-3) 0 var(--space-1); }
+.mnav-group .px-h { margin-bottom: 0; white-space: nowrap; }
+/* Точка битых данных: цвет ошибки, размер как у индикатора в сайдбаре. */
+.mnav-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.mnav-hint { color: var(--text-dim); font-size: var(--fs-label); padding: var(--space-2) 0; }
+/* Ссылка на страницу настроек соединения — текстовая, без рамки. */
+.mnav-link { display: block; width: 100%; text-align: left; padding: var(--space-2) var(--space-1); margin: var(--space-1) 0; border: none; background: none; color: var(--text-dim); font-family: inherit; font-size: var(--fs-label); cursor: pointer; border-radius: var(--radius-tag); }
+.mnav-link:hover { color: var(--accent); }
+/* Правила — спойлеры в центральной колонке: у каждого имя по центру
+   заголовка, внутри — поля правила и варианты ответа теми же спойлерами. */
+.mrules { display: flex; flex-direction: column; gap: var(--space-2); }
+.mrule { border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg-raised); overflow: hidden; }
+.mrule[open] { border-color: var(--accent); }
+.mr-sum, .mv-sum { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 36px; padding: 0 var(--space-3); box-sizing: border-box; cursor: pointer; list-style: none; color: var(--text); font-family: inherit; font-size: var(--fs-label); user-select: none; }
+.mr-sum::-webkit-details-marker, .mv-sum::-webkit-details-marker { display: none; }
+.mr-sum:hover, .mv-sum:hover { background: var(--bg); }
+.mrule[open] > .mr-sum { border-bottom: 1px solid var(--border); }
+.mr-chev { flex: none; color: var(--text-dim); transition: transform .15s ease; }
+.mrule[open] > .mr-sum .mr-chev, .mvar[open] > .mv-sum .mr-chev { transform: rotate(90deg); color: var(--accent); }
+/* Название правила — в центральной части заголовка спойлера. */
+.mr-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); text-align: left; overflow: hidden; white-space: nowrap; }
+.mr-method { flex: none; font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace; font-size: var(--fs-caption); padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-dim); background: var(--bg); }
+.mr-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace; color: var(--text); }
+.mr-sep { flex: none; color: var(--border); }
+.mr-variants-count { flex: none; color: var(--text-dim); font-size: var(--fs-caption); }
+/* Клик по названию — инлайн-редактирование имени (17.11.2026). */
+.mr-title .mr-name-input { width: 100%; padding: 1px 6px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--bg); color: var(--text); font-family: inherit; font-size: inherit; text-align: center; }
+.mr-tail { flex: none; display: flex; align-items: center; }
+.mr-body { padding: var(--space-2) var(--space-3) var(--space-3); }
+.mr-checks { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-2) 0; }
+/* Варианты ответа — вложенные спойлеры внутри правила. */
+.mvars { display: flex; flex-direction: column; gap: var(--space-1); }
+.mvar { border: 1px solid var(--border); border-radius: var(--radius-control); overflow: hidden; }
+.mvar[open] { border-color: var(--accent); }
+.mvar[open] > .mv-sum { border-bottom: 1px solid var(--border); }
+.mv-sum { min-height: 32px; font-size: var(--fs-caption); }
+.mv-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-tail { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+/* Переключатель активности варианта в строке: on = accent-контур, off = приглушённый. */
+button.mv-active { font: inherit; font-size: var(--fs-caption); line-height: 1.6; border-radius: 999px; padding: 0 var(--space-1); background: transparent; cursor: pointer; }
+.mv-active.on { color: var(--accent); border: 1px solid var(--accent); }
+.mv-active.off { color: var(--text-dim); border: 1px solid var(--border); }
+.mv-active:hover { color: var(--accent); border-color: var(--accent); }
+.mv-body { padding: var(--space-2) var(--space-3) var(--space-3); }
 .px-side { background: var(--bg-panel); padding: var(--space-4); }
-.px-side .px-item { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: var(--control-h); margin: var(--space-1) 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg-raised); font-size: var(--fs-label); color: var(--text); cursor: pointer; box-sizing: border-box; }
+.px-side .px-item { position: relative; display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: var(--control-h); margin: var(--space-1) 0; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg-raised); font-size: var(--fs-label); color: var(--text); cursor: pointer; box-sizing: border-box; }
 .px-side .px-item:hover { background: var(--bg); border-color: var(--accent); }
 .px-rule-row { display: flex; align-items: center; gap: var(--space-3); }
 .px-rule-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.px-del { flex: none; margin-left: auto; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; visibility: hidden; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--fs-caption); line-height: 1; border-radius: var(--radius-tag); font-family: inherit; }
+/* play/stop: run button at the end of the profile row (split button) */
+.px-pp { flex: none; margin-left: auto; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-tag); font-family: inherit; }
+.px-pp:hover { color: var(--accent); background: var(--accent-dim); }
+.px-pp.on { color: var(--orange); }
+.px-pp.on:hover { color: var(--orange); background: rgba(255, 106, 0, .15); }
+.px-del { flex: none; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; visibility: hidden; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--fs-caption); line-height: 1; border-radius: var(--radius-tag); font-family: inherit; }
 .px-item:hover .px-del { visibility: visible; }
 .px-del:hover { color: var(--red); background: rgba(249, 112, 102, .12); }
 .px-side .px-item.active { background: var(--accent-dim); color: var(--accent); }
 .px-side .px-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.px-side .px-dot.on { background: var(--accent); }
+.px-side .px-dot.on { background: var(--orange); }
+/* running profile: cyclic orange beam along the row border (Walkman highlight) */
+@property --px-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+.px-side .px-item.running { border-color: transparent; }
+.px-side .px-item.running::before { content: ""; position: absolute; inset: -1px; border-radius: var(--radius-control); padding: 1.5px; background: conic-gradient(from var(--px-a), transparent 0 58%, rgba(255, 106, 0, .25) 72%, var(--orange) 84%, rgba(255, 106, 0, .25) 93%, transparent 100%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: px-beam 2.6s linear infinite; pointer-events: none; }
+@keyframes px-beam { to { --px-a: 360deg; } }
 .px-h { color: var(--text-dim); font-size: var(--fs-caption); margin-bottom: var(--space-1); }
 .px-h-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-1); }
 .px-h-row .px-h { margin-bottom: 0; white-space: nowrap; }
 /* Миниатюрная квадратная кнопка действия у заголовка: размер как у крестика вкладки. */
-.px-mini { flex: none; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--text-dim); cursor: pointer; }
+.px-mini { position: relative; flex: none; width: 20px; height: 20px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--text-dim); cursor: pointer; }
+/* Мини-комментарий при наведении: мгновенный тултип из data-tip (просьба
+   пользователя 17.11.2026). Выводится ПОД кнопкой: над кнопкой шапки панель
+   обрезаёт пузырь по верхнему краю (баг пользователя 17.11.2026). */
+.px-mini[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute; top: calc(100% + 6px); left: 0;
+  padding: 3px 7px; border-radius: var(--radius-control);
+  background: var(--bg-raised); border: 1px solid var(--border);
+  color: var(--text); font-size: var(--fs-label); font-weight: 500; line-height: 1.2;
+  white-space: nowrap; pointer-events: none; z-index: 60;
+}
+/* Кнопки у правого края: тултип прижать к правому краю кнопки, иначе его
+   срежет по правому краю панели. */
+.px-mini[data-tip].tip-right::after { left: auto; right: 0; }
 .px-mini:hover { color: var(--accent); border-color: var(--accent); }
+.px-mini.on { color: var(--accent); border-color: var(--accent); }
+.px-h-tools { display: flex; align-items: center; gap: 4px; }
 /* Имя в строке списка: тянется, ✵ прижат вправо. */
 .px-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .px-main { padding: var(--space-4); overflow-y: auto; }
@@ -1858,23 +1940,28 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
 .px-check-label:hover { background: var(--bg-raised); color: var(--text); }
 .px-input { width: 100%; padding: var(--space-3) var(--space-2); border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: var(--radius-control); font-family: inherit; font-size: var(--fs-label); }
 .px-input:focus { outline: none; border-color: var(--accent); }
-.px-check { width: 16px; height: 16px; accent-color: var(--accent); }
-.px-rules { margin: var(--space-2) 0; }
-.px-chip { display: inline-block; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: var(--radius-control); font-size: var(--fs-label); margin: var(--space-1); cursor: pointer; }
-.px-chip.active { background: var(--accent); color: var(--bg); }
+/* Компактный ряд параметров варианта: поля по ширине содержимого, выровнены по низу. */
+.px-ctl-row { display: flex; gap: var(--space-3); align-items: flex-end; flex-wrap: wrap; margin-bottom: var(--space-2); }
+.px-ctl-row .px-field { margin-bottom: 0; flex: none; width: 128px; }
+.px-ctl-row .px-check-field { width: auto; }
+/* Счётчик задержки: та же высота и рамка, что у select; значения — SVG-значки, перегородок нет. */
+.px-stepper { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: space-between; gap: 2px; width: 100%; height: var(--control-h); padding: 0 3px; border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius-control); }
+.px-step-btn { width: 24px; height: 24px; padding: 0; border: none; background: transparent; color: var(--text-dim); cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.px-step-btn:hover { background: var(--bg-raised); color: var(--text); }
+.px-step-btn:disabled { opacity: 0.35; cursor: default; }
+.px-step-val { flex: 1; min-width: 0; width: auto; padding: 0; border: none; background: transparent; color: var(--text); text-align: center; font-family: inherit; font-size: var(--fs-label); line-height: var(--control-h); border-radius: 0; -moz-appearance: textfield; appearance: textfield; }
+.px-step-val:focus { outline: none; }
+.px-step-val::-webkit-outer-spin-button, .px-step-val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* JSON-поле: тёмный фон, моноширинный, вертикальный ресайз — как было. */
 .px-json { width: 100%; padding: var(--space-2); border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: monospace; font-size: var(--fs-label); resize: vertical; }
-/* Лог трафика: формат строк как журнал запросов (моноширинный, новые сверху). */
-.px-log { flex: 1; min-height: 0; overflow-y: auto; margin-top: var(--space-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-caption); line-height: 15px; }
-.px-log-line { display: flex; align-items: baseline; gap: var(--space-2); white-space: nowrap; padding: 1px var(--space-1); }
-.px-log-line:hover { background: var(--bg); }
-.px-log-time { flex: none; color: var(--text-dim); }
-.px-log-method { flex: none; width: 44px; color: var(--text-dim); }
-.px-log-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-.px-log-ms { flex: none; color: var(--text-dim); }
-.px-status { flex: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); font-size: var(--fs-label); }
-.px-status.ok { color: var(--accent); }
-.px-status.err { color: var(--red); }
-.px-empty { padding: var(--space-5); text-align: center; color: var(--text-dim); }
+/* Заголовок JSON-поля: метка слева, подсказка о токенах справа — экономия строк. */
+.px-json-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }
+.px-json-head .px-label { margin-bottom: var(--space-1); }
+.px-json-head .px-help { margin: 0 0 var(--space-1); }
+/* Ряд кнопок варианта в одну линию. */
+.px-btn-row { display: flex; gap: var(--space-3); margin-bottom: var(--space-2); }
+.px-btn-row .px-btn { flex: 1; }
+
 .px-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3); }
 .px-help { margin: var(--space-1) 0; font-size: var(--fs-label); color: var(--text-dim); }
 .px-help summary { cursor: pointer; user-select: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); }

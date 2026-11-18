@@ -32,7 +32,7 @@ pub fn MethodSelect(
             class=move || format!("method-picker{}", if open.get() { " is-open" } else { "" })
             style=("--mc", cur_color)
         >
-            <button
+            <button data-bh="request.method"
                 type="button"
                 class="method-select"
                 aria-haspopup="listbox"
@@ -73,7 +73,7 @@ pub fn MethodSelect(
                                 }
                             };
                             view! {
-                                <button type="button" class=cls style=("--mc", move || dot_color) on:click=pick>
+                                <button data-bh=format!("request.method_option.{}", m) type="button" class=cls style=("--mc", move || dot_color) on:click=pick>
                                     <span class="method-dot"></span>
                                     <span class="method-menu-name">{m.clone()}</span>
                                     <span class="method-check">{check}</span>

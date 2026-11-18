@@ -1,0 +1,497 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Bunny Hops Debug API",
+    "version": "1.0.0",
+    "description": "Контракт API приложения для внешних инструментов (MCP). Минимальный API без гейта: GET /api/status, POST/GET /api/debug-mode. Вся остальная поверхность — /debug/* и требует включённого гейта: тумблер Debug API в UI, POST /api/debug-mode {\"on\": true} или ENABLE_DEBUG_API=1 при старте; до включения — 404 debug_api_disabled. Исключение из гейта: запросы самого приложения (заголовок x-hop-ui, для WebSocket — ?src=ui) пропускаются всегда — UI работает и при выключенном MCP. Ответы действий содержат stateDiff (до/после). Ошибки: ok=false + error; 400 payload, 404 маршрут/путь/гейт, 500 внутренняя."
+  },
+  "paths": {
+    "/api/debug-mode": {
+      "post": {
+        "summary": "Гейт Debug API: {\"on\": true|false}",
+        "responses": {
+          "200": {
+            "description": "{\"ok\": true, \"enabled\": bool}"
+          }
+        },
+        "description": "Включить/выключить отладочную поверхность: {\"on\": true|false}. Часть минимального API, доступна без гейта."
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Статус приложения",
+        "description": "Порт, версия, состояние mock-серверов. Часть минимального API, доступна без гейта.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/actions": {
+      "get": {
+        "summary": "Реестр действий: name, description, payload-пример",
+        "responses": {
+          "200": {
+            "description": "{\"actions\": [...]}"
+          }
+        }
+      }
+    },
+    "/debug/automation-rules": {
+      "get": {
+        "summary": "Журнал API-записей",
+        "description": "Массив записей отправленных запросов приложения (до 50 последних).",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/dispatch": {
+      "post": {
+        "summary": "Единая точка действий",
+        "description": "Тело: {\"action\": \"<имя>\", \"payload\": {...}}. Действия: ui.set, ui.reset, traffic.clear, logs.clear. Остальные операции — прямые маршруты ниже. Ответ всегда содержит stateDiff: сравнение полного состояния до и после действия (бюджет 40 записей).",
+        "responses": {
+          "200": {
+            "description": "{\"ok\": true, \"action\": ..., \"result\": {...}, \"stateDiff\": {path: {before, after}}}"
+          },
+          "400": {
+            "description": "неизвестное действие или неверный payload; stateDiff тоже присутствует"
+          }
+        }
+      }
+    },
+    "/debug/eyes": {
+      "get": {
+        "summary": "Кадр окна приложения",
+        "description": "Снимает текущее окно приложения. По умолчанию — PNG (image/png, широкие кадры масштабируются к 2060). ?json=1 — метаданные вместо PNG, ?full=1 — без масштабирования. Кадр также лежит в temp, путь в метаданных.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/history": {
+      "get": {
+        "summary": "История запросов",
+        "description": "Последние выполненные через приложение запросы.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/history/clear": {
+      "post": {
+        "summary": "Очистить историю запросов",
+        "description": "Возвращает {ok, removed}.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/log": {
+      "post": {
+        "summary": "Запись в журнал приложения",
+        "description": "Тело: {\"msg\": \"...\"} — строка в bunny-hops.log.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/logs": {
+      "get": {
+        "summary": "Журнал действий приложения (свежие первыми)",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "area",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "фильтр по области: mock, request, theme, ui, debug..."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{\"ok\": true, \"items\": [...]}"
+          }
+        }
+      }
+    },
+    "/debug/mock/preview": {
+      "post": {
+        "summary": "Предпросмотр шаблона",
+        "description": "Рандомизация JSON-шаблона тем же генератором, что использует mock-сервер.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/profile": {
+      "get": {
+        "summary": "Читать mock-профиль",
+        "description": "JSON профиля по имени (?name=).",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      },
+      "post": {
+        "summary": "Сохранить mock-профиль",
+        "description": "Тело — JSON профиля mock-сервера.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/profile/delete": {
+      "post": {
+        "summary": "Удалить mock-профиль",
+        "description": "Тело: {\"name\": \"<имя>\"}.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/profiles": {
+      "get": {
+        "summary": "Список mock-профилей",
+        "description": "Имена сохранённых mock-профилей.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/start": {
+      "post": {
+        "summary": "Запустить mock-сервер",
+        "description": "Старт профиля на его порту.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/status": {
+      "get": {
+        "summary": "Состояние mock-серверов",
+        "description": "Запущенные профили и порты.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/stop": {
+      "post": {
+        "summary": "Остановить mock-сервер",
+        "description": "Остановка запущенного профиля.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/mock/traffic": {
+      "get": {
+        "summary": "Трафик mock-серверов",
+        "description": "Записанные mock-серверами обращения.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/openapi.json": {
+      "get": {
+        "summary": "Этот контракт; доступен всегда, без гейта",
+        "responses": {
+          "200": {
+            "description": "OpenAPI документ"
+          }
+        }
+      }
+    },
+    "/debug/profiles": {
+      "get": {
+        "summary": "Список профилей",
+        "description": "Все сохранённые профили запросов.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      },
+      "post": {
+        "summary": "Создать/сохранить профиль",
+        "description": "Тело — JSON профиля.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/profiles/activate": {
+      "post": {
+        "summary": "Активировать профиль",
+        "description": "Тело: {\"name\": \"<имя>\"}.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/profiles/delete": {
+      "post": {
+        "summary": "Удалить профиль",
+        "description": "Тело: {\"name\": \"<имя>\"}.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/proxy": {
+      "post": {
+        "summary": "Стриминговый прокси",
+        "description": "?url=<целевой> — тело ответа передаётся по мере поступления, заголовки цели копируются 1:1 (без hop-by-hop), ставится X-Proxy-Final-Url; ошибка подключения -> 502 + X-Proxy-Error.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/request": {
+      "post": {
+        "summary": "Выполнить HTTP-запрос",
+        "description": "Тело: {\"url\": \"...\"} или {\"profile\": \"<имя>\", \"path\": \"...\"} плюс необязательные method, headers, body, query. Выполняет запрос клиентом приложения и пишет в историю.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/reset": {
+      "post": {
+        "summary": "Сброс тестового окрущения: трафик mock + журнал действий + UI к значениям по умолчанию",
+        "responses": {
+          "200": {
+            "description": "{\"ok\": true, \"traffic\": \"cleared\", \"logs_removed\": N, \"ui\": {status}}"
+          }
+        }
+      }
+    },
+    "/debug/state": {
+      "get": {
+        "summary": "Полное состояние приложения",
+        "description": "Верхний уровень: app (name, version, port, uptime_s, debug_enabled), config (theme), profiles (списки HTTP-профилей и active), mock (profiles — полные JSON профилей по именам, engine — запущенные серверы), traffic (записи запросов по профилям mock), ui (снимок состояния UI, пустой пока окно не подтверждался).",
+        "responses": {
+          "200": {
+            "description": "Полное состояние"
+          },
+          "404": {
+            "description": "debug_api_disabled"
+          }
+        }
+      },
+      "post": {
+        "summary": "Перезаписать путь состоянием целиком: {\"path\": \"...\", \"value\": ...}",
+        "description": "Пути на запись: mock.profiles.<имя> (null — удалить профиль), config.theme (\"dark\"|\"light\"), ui.<путь> (команда живому окну, answer status applied|pending). Остальные пути — 400.",
+        "responses": {
+          "200": {
+            "description": "{\"ok\": true, \"path\": ..., \"result\": {...}}"
+          },
+          "400": {
+            "description": "ошибка payload"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Как POST, но объекты объединяются поверх текущего значения (deep merge)",
+        "responses": {
+          "200": {
+            "description": "то же, что POST"
+          }
+        }
+      }
+    },
+    "/debug/state/{path}": {
+      "get": {
+        "summary": "Значение по пути; сегменты через точку, например mock.profiles.mdm.routes",
+        "responses": {
+          "200": {
+            "description": "значение"
+          },
+          "404": {
+            "description": "пути нет или гейт выключен"
+          }
+        }
+      },
+      "post": {
+        "summary": "Новое значение пути; тело запроса = значение целиком",
+        "responses": {
+          "200": {
+            "description": "результат записи"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Deep merge значения пути телом запроса",
+        "responses": {
+          "200": {
+            "description": "результат записи"
+          }
+        }
+      }
+    },
+    "/debug/stream": {
+      "get": {
+        "summary": "WS-поток событий (рукопожатие отклоняется при выключенном гейте)",
+        "description": "При подключении — hello {app, version, port, debug_enabled}. Дальше события: {type: action, area, action, details, ts} из журнала действий; {type: ui_snapshot, seq} при подтверждении состояния UI; {type: ui_command, path, value} и {type: ui_reset} — команды живому окну.",
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade"
+          },
+          "404": {
+            "description": "debug_api_disabled"
+          }
+        }
+      }
+    },
+    "/debug/theme": {
+      "get": {
+        "summary": "Текущая тема",
+        "description": "Ответ: {\"mode\": \"dark\"|\"light\"}.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      },
+      "post": {
+        "summary": "Сменить тему",
+        "description": "Тело: {\"mode\": \"dark\"|\"light\"}.",
+        "responses": {
+          "200": {
+            "description": "JSON-ответ"
+          },
+          "404": {
+            "description": "гейт выключен (debug_api_disabled) или маршрут не найден"
+          }
+        }
+      }
+    },
+    "/debug/ui-state": {
+      "post": {
+        "summary": "Подтверждение состояния UI от фронтенда (служебный эндпоинт приложения)",
+        "responses": {
+          "200": {
+            "description": "{\"ok\": true, \"seq\": N}"
+          }
+        }
+      }
+    }
+  }
+}

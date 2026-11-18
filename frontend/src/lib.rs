@@ -8,11 +8,15 @@ mod storage;
 mod timefmt;
 mod types;
 mod util;
+mod http_status;
 mod mock_view;
+mod mock_nav;
 mod logic;
 
 mod stream;
 mod ui;
+mod debug_bridge;
+mod debug_elements;
 
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn main() {

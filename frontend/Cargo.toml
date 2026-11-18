@@ -14,14 +14,16 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = [
   "AbortController", "AbortSignal", "Blob", "BlobPropertyBag", "Document",
   "DomRect", "Element", "HtmlElement", "HtmlInputElement", "HtmlSelectElement",
-  "HtmlTextAreaElement", "Headers", "InputEvent", "KeyboardEvent",
+  "HtmlTextAreaElement", "HtmlDetailsElement", "Headers", "InputEvent", "KeyboardEvent",
   "HtmlDocument", "Location", "MediaQueryList", "Navigator", "Performance", "ReadableStream",
   "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Request",
   "RequestInit", "RequestMode", "Response", "Storage", "TextDecoder",
   "TextDecodeOptions", "Url", "Window",
   "Clipboard", "Crypto", "EventTarget",
-  "CssStyleDeclaration", "MutationObserver", "MutationObserverInit", "Event", "NodeList",
+  "CssStyleDeclaration", "MutationObserver", "MutationObserverInit", "Event", "EventInit", "NodeList",
   "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollBehavior",
+  "WebSocket", "MessageEvent", "CloseEvent", "BinaryType",
+  "MouseEvent", "MouseEventInit",
 ] }
 serde = { version = "1", features = ["derive"] }
 console_error_panic_hook = "0.1"

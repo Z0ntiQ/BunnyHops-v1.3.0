@@ -1,0 +1,844 @@
+{
+ "version": 1,
+ "screen": "Два экрана: (1) главное окно запроса (app.rs): сверху облако вкладок и поиск, панель метода/URL/Send, вкладки Params/Headers/Body/Scenario/Vars, панель ответа справа, нижний док Logs/Traffic, модалки вкладок/групп; (2) вкладка Mock (mock_view.rs): профили слева, параметры и правила по центру, модалки подтверждения. Какой экран активен — видно по объектам в «objects».",
+ "note": "Каталог объектов UI и их действий — библиотека селекторов (BROOP). id совпадают с атрибутом data-bh в разметке app.rs, mock_view.rs, ui.rs, method_select.rs. Id вида «префикс.*» — шаблон динамических строк: в живом DOM у них конкретный индекс или имя. Живое состояние — GET /debug/broop (слияние каталога с DOM). «unmarked_in_dom» — интерактивные элементы без data-bh: должны быть пусты, иначе разметка неполная и каталог надо пополнить.",
+ "objects": [
+  {
+   "id": "mock.name",
+   "kind": "input",
+   "desc": "Имя открытого профиля (только чтение)",
+   "actions": [
+    "get"
+   ]
+  },
+  {
+   "id": "mock.listen_port",
+   "kind": "input",
+   "desc": "Порт, на котором слушает mock-сервер профиля",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "mock.upstream",
+   "kind": "input",
+   "desc": "Upstream-адрес (необязательный, запросы мимо правил)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "mock.save_profile",
+   "kind": "button",
+   "desc": "Сохранить параметры блока «Соединение»",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "mock.add_rule",
+   "kind": "button",
+   "desc": "Добавить правило (открывает модалку нового правила)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "rule.row.*",
+   "kind": "row",
+   "desc": "Строка правила в списке правил (клик — раскрыть/свернуть)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "rule.method.*",
+   "kind": "select",
+   "desc": "HTTP-метод, который перехватывает правило (*, GET, POST, ...)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "rule.match.*",
+   "kind": "select",
+   "desc": "Тип совпадения пути (exact / prefix)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "rule.path.*",
+   "kind": "input",
+   "desc": "Путь запроса для правила",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "rule.enabled.*",
+   "kind": "checkbox",
+   "desc": "Правило включено / выключено",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "rule.cycle.*",
+   "kind": "checkbox",
+   "desc": "Циклическая выдача вариантов по очереди",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "rule.new_variant.*",
+   "kind": "button",
+   "desc": "Добавить вариант ответа в правило",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "rule.save",
+   "kind": "button",
+   "desc": "Сохранить профиль целиком из карточки правила",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "rule.delete.*",
+   "kind": "button",
+   "desc": "Удалить правило",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "variant.row.*",
+   "kind": "row",
+   "desc": "Строка варианта ответа в правиле (клик — раскрыть/свернуть)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "variant.activate.*",
+   "kind": "button",
+   "desc": "Сделать вариант активным / снять активность",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "variant.status.*",
+   "kind": "select",
+   "desc": "HTTP-код ответа варианта",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "variant.delay_down.*",
+   "kind": "button",
+   "desc": "Уменьшить задержку ответа на 100 мс",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "variant.delay.*",
+   "kind": "input",
+   "desc": "Задержка ответа в миллисекундах",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "variant.delay_up.*",
+   "kind": "button",
+   "desc": "Увеличить задержку ответа на 100 мс",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "variant.randomize.*",
+   "kind": "checkbox",
+   "desc": "Рандомизировать токены {{...}} в теле ответа",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "variant.json.*",
+   "kind": "textarea",
+   "desc": "JSON тела ответа варианта",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "variant.make_active.*",
+   "kind": "button",
+   "desc": "Сделать вариант активным (кнопка внутри карточки)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "variant.delete.*",
+   "kind": "button",
+   "desc": "Удалить вариант ответа",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "sidebar.sort_desc",
+   "kind": "button",
+   "desc": "Переключить направление порядка списка профилей",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "sidebar.sort_alpha",
+   "kind": "button",
+   "desc": "Переключить порядок профилей: алфавит / история создания",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "sidebar.new_profile",
+   "kind": "button",
+   "desc": "Создать профиль (открывает поле имени)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "profile.new_name",
+   "kind": "input",
+   "desc": "Имя нового профиля (Enter = создать)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "profile.create",
+   "kind": "button",
+   "desc": "Создать профиль с введённым именем",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "profile.create_cancel",
+   "kind": "button",
+   "desc": "Отменить создание профиля",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "profile.row.*",
+   "kind": "row",
+   "desc": "Строка профиля в сайдбаре (клик — открыть профиль)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "profile.start_stop.*",
+   "kind": "button",
+   "desc": "Запустить / остановить mock-сервер профиля",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "profile.delete.*",
+   "kind": "button",
+   "desc": "Удалить профиль (открывает подтверждение)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.del_profile_confirm",
+   "kind": "button",
+   "desc": "Модалка удаления профиля: подтвердить удаление",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.del_profile_cancel",
+   "kind": "button",
+   "desc": "Модалка удаления профиля: отменить",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.rule_method",
+   "kind": "select",
+   "desc": "Модалка нового правила: метод запроса",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "modal.rule_match",
+   "kind": "select",
+   "desc": "Модалка нового правила: тип совпадения",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "modal.rule_status",
+   "kind": "select",
+   "desc": "Модалка нового правила: код ответа (имя правила подставится само)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "modal.rule_add",
+   "kind": "button",
+   "desc": "Модалка нового правила: добавить правило",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.rule_cancel",
+   "kind": "button",
+   "desc": "Модалка нового правила: отменить",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.mock_toggle",
+   "kind": "button",
+   "desc": "Переключить режим Mock-сервера (BunnyProx) в верхнем баре",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.mcp_toggle",
+   "kind": "button",
+   "desc": "Тумблер MCP/debug-режима: включает debug-API и push элементов",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.tab_save",
+   "kind": "button",
+   "desc": "Сохранить текущий запрос как вкладку (открывает модалку имени)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.api_cloud",
+   "kind": "button",
+   "desc": "Чип «запросы, присланные в API»: открыть панель api_log",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.search_open",
+   "kind": "button",
+   "desc": "Пилюля поиска по экрану (открывает строку поиска)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.search_input",
+   "kind": "input",
+   "desc": "Строка поиска по элементам экрана",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "topbar.zoom_out",
+   "kind": "button",
+   "desc": "Уменьшить масштаб интерфейса",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "topbar.zoom_in",
+   "kind": "button",
+   "desc": "Увеличить масштаб интерфейса",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "tab.chip.*",
+   "kind": "row",
+   "desc": "Чип сохранённого запроса в облаке вкладок (клик — загрузить запрос)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "tab.delete.*",
+   "kind": "button",
+   "desc": "Удалить вкладку (крестик на чипе, открывает подтверждение)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "group.dot.*",
+   "kind": "button",
+   "desc": "Значок сохранённой группы вкладок (клик — восстановить группу)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.method",
+   "kind": "button",
+   "desc": "Открытый метод главного запроса (открывает список методов)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.method_option.*",
+   "kind": "button",
+   "desc": "Пункт списка HTTP-методов",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.url",
+   "kind": "input",
+   "desc": "URL главного запроса (можно {{var}})",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "request.send",
+   "kind": "button",
+   "desc": "Send — выполнить главный запрос",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.stop",
+   "kind": "button",
+   "desc": "Stop — отменить выполняемый запрос",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.tab_params",
+   "kind": "button",
+   "desc": "Вкладка URL Params",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.tab_headers",
+   "kind": "button",
+   "desc": "Вкладка Headers",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.tab_body",
+   "kind": "button",
+   "desc": "Вкладка Body",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.tab_steps",
+   "kind": "button",
+   "desc": "Вкладка Scenario (шаги)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.tab_vars",
+   "kind": "button",
+   "desc": "Вкладка Vars (переменные)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "request.body",
+   "kind": "textarea",
+   "desc": "Тело запроса (JSON)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "steps.run_all",
+   "kind": "button",
+   "desc": "Run all — выполнить шаги сценария последовательно",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "steps.add_current",
+   "kind": "button",
+   "desc": "Добавить текущий запрос как шаг сценария",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "steps.reset",
+   "kind": "button",
+   "desc": "Сбросить статусы шагов",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "steps.clear",
+   "kind": "button",
+   "desc": "Очистить список шагов",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "step.url.*",
+   "kind": "input",
+   "desc": "URL шага сценария (можно {{var}})",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "step.body.*",
+   "kind": "textarea",
+   "desc": "Тело шага сценария",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "step.capture_name.*",
+   "kind": "input",
+   "desc": "Имя переменной для захвата из ответа шага",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "step.capture_path.*",
+   "kind": "input",
+   "desc": "JSONPath захвата из ответа шага (например $.data.token)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "step.delete.*",
+   "kind": "button",
+   "desc": "Удалить шаг сценария",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.view_pretty",
+   "kind": "button",
+   "desc": "Переключить ответ в Pretty-вид",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.view_raw",
+   "kind": "button",
+   "desc": "Переключить ответ в Raw-вид",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.tab_body",
+   "kind": "button",
+   "desc": "Вкладка Response body",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.tab_headers",
+   "kind": "button",
+   "desc": "Вкладка Response headers",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.search_input",
+   "kind": "input",
+   "desc": "Поиск по тексту ответа",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "response.search_prev",
+   "kind": "button",
+   "desc": "Перейти к предыдущему совпадению в ответе",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.search_next",
+   "kind": "button",
+   "desc": "Перейти к следующему совпадению в ответе",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "response.search_clear",
+   "kind": "button",
+   "desc": "Сбросить поиск по ответу",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "api_log.refresh",
+   "kind": "button",
+   "desc": "Обновить список запросов, присланных в API",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "api_log.close",
+   "kind": "button",
+   "desc": "Закрыть панель api_log",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.tab_name",
+   "kind": "input",
+   "desc": "Имя новой вкладки (модалка сохранения запроса)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "modal.tab_save_confirm",
+   "kind": "button",
+   "desc": "Сохранить вкладку",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.tab_save_cancel",
+   "kind": "button",
+   "desc": "Отмена в модалке новой вкладки",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.tab_del_confirm",
+   "kind": "button",
+   "desc": "Подтвердить удаление вкладки",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.tab_del_cancel",
+   "kind": "button",
+   "desc": "Отмена в модалке удаления вкладки",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.group_name",
+   "kind": "input",
+   "desc": "Имя новой группы вкладок",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "modal.group_create",
+   "kind": "button",
+   "desc": "Создать группу вкладок",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "modal.group_cancel",
+   "kind": "button",
+   "desc": "Отмена в модалке группы",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "bottom.logs_toggle",
+   "kind": "button",
+   "desc": "Переключить панель Logs (журнал действий)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "bottom.traffic_toggle",
+   "kind": "button",
+   "desc": "Переключить панель Traffic (трафик)",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "kv.morph_toggle",
+   "kind": "button",
+   "desc": "Bulk edit — переключить редактор в текстовый режим",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "kv.bulk_text",
+   "kind": "textarea",
+   "desc": "Массовое редактирование строк (формат key: value построчно)",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "kv.morph_done",
+   "kind": "button",
+   "desc": "Готово — применить массовое редактирование",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "kv.add_row",
+   "kind": "button",
+   "desc": "+ Add new — добавить пустую строку в редактор",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "kv.row_check.*",
+   "kind": "input",
+   "desc": "Чекбокс включения строки params/headers/vars",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "kv.row_key.*",
+   "kind": "input",
+   "desc": "Ключ строки params/headers/vars",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "kv.row_value.*",
+   "kind": "input",
+   "desc": "Значение строки params/headers/vars",
+   "actions": [
+    "get",
+    "set"
+   ]
+  },
+  {
+   "id": "kv.row_delete.*",
+   "kind": "button",
+   "desc": "Удалить строку params/headers/vars",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "kv.add_empty",
+   "kind": "button",
+   "desc": "Клик по пустой строке — добавить первую запись",
+   "actions": [
+    "click"
+   ]
+  },
+  {
+   "id": "ui.copy.*",
+   "kind": "button",
+   "desc": "Кнопка копирования (значение в id — назначение кнопки)",
+   "actions": [
+    "click"
+   ]
+  }
+ ]
+}

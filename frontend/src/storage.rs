@@ -71,11 +71,9 @@ pub fn load_groups() -> Vec<SavedGroup> {
 }
 
 pub async fn fetch_api_calls() -> Vec<ApiCall> {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return Vec::new(),
+    let Ok(promise) = crate::util::ui_fetch("/debug/automation-rules", None, None) else {
+        return Vec::new();
     };
-    let promise = win.fetch_with_str("/api/automation-rules");
     let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
         return Vec::new();
     };

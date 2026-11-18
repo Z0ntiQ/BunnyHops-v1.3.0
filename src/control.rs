@@ -22,7 +22,9 @@ use crate::AppState;
 
 const STATE_DIR_NAME: &str = "state";
 const HISTORY_CAP: usize = 200;
-const ACTION_LOG_CAP: usize = 200;
+// Журнал переживает перезапуск (пишется в action_log.json), поэтому держим
+// историю с запасом: 200 записей кончались за один активный прогон.
+const ACTION_LOG_CAP: usize = 1000;
 const MAX_BODY: usize = 10 * 1024 * 1024;
 
 pub static STARTED: OnceLock<Instant> = OnceLock::new();
@@ -45,21 +47,21 @@ fn state_dir() -> PathBuf {
     }
 }
 
-fn read_store(file: &str) -> Value {
+pub(crate) fn read_store(file: &str) -> Value {
     fs::read_to_string(state_dir().join(file))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(Value::Null)
 }
 
-fn write_store(file: &str, value: &Value) -> Result<(), String> {
+pub(crate) fn write_store(file: &str, value: &Value) -> Result<(), String> {
     let dir = state_dir();
     let _ = fs::create_dir_all(&dir);
     fs::write(dir.join(file), serde_json::to_string_pretty(value).unwrap_or_default())
         .map_err(|e| format!("не удалось записать {file}: {e}"))
 }
 
-fn history_store() -> &'static Mutex<Vec<Value>> {
+pub(crate) fn history_store() -> &'static Mutex<Vec<Value>> {
     static H: OnceLock<Mutex<Vec<Value>>> = OnceLock::new();
     H.get_or_init(|| Mutex::new(load_history()))
 }
@@ -71,7 +73,7 @@ fn load_history() -> Vec<Value> {
     }
 }
 
-fn action_log_store() -> &'static Mutex<Vec<Value>> {
+pub(crate) fn action_log_store() -> &'static Mutex<Vec<Value>> {
     static L: OnceLock<Mutex<Vec<Value>>> = OnceLock::new();
     L.get_or_init(|| Mutex::new(load_action_log()))
 }
@@ -97,16 +99,93 @@ fn push_capped(store: &Mutex<Vec<Value>>, rec: Value, cap: usize) {
 }
 
 /// Единый логер действий приложения. Через него проходят ВСЕ действия:
-/// мутации control-плоскости, прокси-вызовы, mock-движок и заметки UI (`POST /api/log`).
+/// мутации control-плоскости, прокси-вызовы, mock-движок, транспорт API
+/// (см. `api_access_middleware`) и заметки UI (`POST /api/log`).
+/// Запись сразу уходит в action_log.json: журнал виден и после перезапуска.
 pub fn log_action(area: &str, action: &str, details: Value) {
-    push_capped(
-        action_log_store(),
-        json!({"ts": now_epoch(), "area": area, "action": action, "details": details}),
-        ACTION_LOG_CAP,
-    );
+    let snapshot = {
+        let store = action_log_store();
+        push_capped(
+            store,
+            json!({"ts": now_epoch(), "area": area, "action": action, "details": details.clone()}),
+            ACTION_LOG_CAP,
+        );
+        store.lock().unwrap().clone()
+    };
+    let _ = write_store("action_log.json", &Value::Array(snapshot));
+    // Шина отладки: каждое содержательное действие видно внешним WS-клиентам.
+    crate::debug_api::publish_action(area, action, &details);
 }
 
-fn json_response(status: StatusCode, body: &Value) -> Response {
+/// Запись без деталей: для событий оболочки (запуск окна, закрытие).
+pub fn log_simple(area: &str, action: &str) {
+    log_action(area, action, json!({}));
+}
+
+// ---------- транспортное логирование ----------
+//
+// Правило пользователя 17.11.2026: каждая функция приложения покрыта
+// логированием. Средство — этот middleware: он видит ВСЕ маршруты, включая
+// будущие. Правила тишины, чтобы журнал оставался полезным:
+// * опросы панели (POLL_GETS) при успешном статусе не пишутся — они каждые 2-4 с;
+// * маршруты с семантической записью (SEMANTIC) при успехе не дублируются —
+//   содержательная запись богаче; ошибка на таком маршруте пишется всегда.
+
+const POLL_GETS: &[&str] = &[
+    "/debug/logs",
+    "/api/history",
+    "/debug/mock/traffic",
+    "/debug/mock/status",
+    "/api/status",
+    "/api/profiles",
+    "/debug/mock/profiles",
+    "/debug/mock/profile",
+    "/debug/theme",
+    "/api/automation-rules",
+];
+
+const SEMANTIC: &[&str] = &[
+    "/proxy",
+    "/debug/request",
+    "/api/profiles",
+    "/debug/profiles/activate",
+    "/debug/profiles/delete",
+    "/debug/theme",
+    "/debug/history/clear",
+    "/api/log",
+    "/debug/mock/profile",
+    "/debug/mock/profile/delete",
+    "/debug/mock/start",
+    "/debug/mock/stop",
+    "/api/debug-mode",
+];
+
+/// Журналирует каждый запрос к API: метод, путь, статус, длительность.
+/// Статика и fallback SPA проходят транзитом (путь вне области API).
+pub async fn api_access_middleware(req: Request, next: axum::middleware::Next) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let started = Instant::now();
+    let response = next.run(req).await;
+    let in_scope = path.starts_with("/api/") || path.starts_with("/debug/") || path == "/screenshot";
+    if !in_scope {
+        return response;
+    }
+    let status = response.status();
+    let success = status.is_success();
+    let polled = method == Method::GET && POLL_GETS.contains(&path.as_str());
+    let semantic = SEMANTIC.contains(&path.as_str());
+    if !success || !(polled || semantic) {
+        log_action(
+            "api",
+            &format!("{method} {path}"),
+            json!({"status": status.as_u16(), "ms": started.elapsed().as_millis() as u64}),
+        );
+    }
+    response
+}
+
+pub(crate) fn json_response(status: StatusCode, body: &Value) -> Response {
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json; charset=utf-8")
@@ -115,7 +194,7 @@ fn json_response(status: StatusCode, body: &Value) -> Response {
         .unwrap()
 }
 
-fn err(status: StatusCode, message: &str) -> Response {
+pub(crate) fn err(status: StatusCode, message: &str) -> Response {
     json_response(status, &json!({"ok": false, "error": message}))
 }
 
@@ -163,7 +242,7 @@ struct ProfileIn {
     headers: Option<serde_json::Map<String, Value>>,
 }
 
-fn profiles_doc() -> Value {
+pub(crate) fn profiles_doc() -> Value {
     match read_store("profiles.json") {
         v @ Value::Object(_) => v,
         _ => json!({"profiles": []}),
@@ -473,12 +552,28 @@ async fn theme_post_handler(State(_state): State<AppState>, req: Request) -> Res
     json_response(StatusCode::OK, &json!({"ok": true, "mode": mode}))
 }
 
-// ---------- журнал действий и статус ----------
+// ---------- гейт API отладки ----------
 
-async fn action_log_get_handler(State(_state): State<AppState>) -> Response {
-    let items: Vec<Value> = action_log_store().lock().unwrap().iter().rev().cloned().collect();
-    json_response(StatusCode::OK, &json!({"ok": true, "items": items, "total": items.len()}))
+/// Вернуть текущее состояние debug-гейта.
+async fn debug_mode_get_handler() -> impl axum::response::IntoResponse {
+    axum::Json(json!({ "ok": true, "enabled": crate::debug_api::is_enabled() }))
 }
+
+async fn debug_mode_post_handler(State(_state): State<AppState>, req: Request) -> Response {
+    let body = match read_json_body(req).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let on = match body.get("on").and_then(Value::as_bool) {
+        Some(v) => v,
+        None => return err(StatusCode::BAD_REQUEST, r#"нужно {"on": true|false}"#),
+    };
+    crate::debug_api::set_enabled(on);
+    log_action("debug", "mode", json!({"on": on, "via": "api"}));
+    json_response(StatusCode::OK, &json!({"ok": true, "enabled": on}))
+}
+
+// ---------- журнал действий и статус ----------
 
 async fn status_get_handler(State(_state): State<AppState>) -> Response {
     let doc = profiles_doc();
@@ -499,24 +594,31 @@ async fn status_get_handler(State(_state): State<AppState>) -> Response {
             "history_count": history_store().lock().unwrap().len(),
             "action_log_count": action_log_store().lock().unwrap().len(),
             "mock_engine": crate::mock_server::control_snapshot(),
+            "debug_api": {"enabled": crate::debug_api::is_enabled()},
         }),
     )
 }
 
 // ---------- маршруты ----------
 
+/// Минимальный API без гейта: здоровье приложения и переключатель MCP.
 pub fn control_router() -> Router<AppState> {
     Router::new()
         .route("/api/status", get(status_get_handler))
-        .route("/api/request", post(request_post_handler))
-        .route("/api/history", get(history_get_handler))
-        .route("/api/history/clear", post(history_clear_handler))
-        .route("/api/profiles", get(profiles_list_handler))
-        .route("/api/profiles", post(profiles_post_handler))
-        .route("/api/profiles/activate", post(profiles_activate_handler))
-        .route("/api/profiles/delete", post(profiles_delete_handler))
-        .route("/api/theme", get(theme_get_handler))
-        .route("/api/theme", post(theme_post_handler))
-        .route("/api/action-log", get(action_log_get_handler))
-        .route("/api/log", post(log_post_handler))
+        .route("/api/debug-mode", axum::routing::post(debug_mode_post_handler).get(debug_mode_get_handler))
+}
+
+/// Функциональная поверхность MCP (под гейтом debug_api::gate_or_ui).
+pub fn mcp_router() -> Router<AppState> {
+    Router::new()
+        .route("/debug/request", post(request_post_handler))
+        .route("/debug/history", get(history_get_handler))
+        .route("/debug/history/clear", post(history_clear_handler))
+        .route("/debug/profiles", get(profiles_list_handler))
+        .route("/debug/profiles", post(profiles_post_handler))
+        .route("/debug/profiles/activate", post(profiles_activate_handler))
+        .route("/debug/profiles/delete", post(profiles_delete_handler))
+        .route("/debug/theme", get(theme_get_handler))
+        .route("/debug/theme", post(theme_post_handler))
+        .route("/debug/log", post(log_post_handler))
 }

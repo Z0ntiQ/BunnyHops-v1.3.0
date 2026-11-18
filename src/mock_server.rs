@@ -127,6 +127,10 @@ struct Profile {
     listen_port: u16,
     upstream: Option<String>,
     rules: Vec<Rule>,
+    /// Время создания в unix-секундах: порядок истории. Для старых файлов
+    /// подставляется mtime (список профилей, запрос пользователя 17.11.2026).
+    #[serde(default)]
+    created_at: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,6 +181,47 @@ fn save_profile(profile: &Profile) -> Result<(), String> {
     fs::write(&path, data).map_err(|e| format!("write: {e}"))
 }
 
+/// Натуральный порядок имён: «6» < «7» < «10». Числа сравниваются числами,
+/// остальное — посимвольно. Инцидент 17.11.2026: список профилей шел в порядке
+/// fs::read_dir (порядок записей в каталоге), нумерация скакала не по порядку.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let ai: Vec<char> = a.chars().collect();
+    let bi: Vec<char> = b.chars().collect();
+    let (mut i, mut j) = (0usize, 0usize);
+    loop {
+        match (ai.get(i), bi.get(j)) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => {
+                if x.is_ascii_digit() && y.is_ascii_digit() {
+                    let (mut ki, mut kj) = (i, j);
+                    while ki < ai.len() && ai[ki].is_ascii_digit() {
+                        ki += 1;
+                    }
+                    while kj < bi.len() && bi[kj].is_ascii_digit() {
+                        kj += 1;
+                    }
+                    let na: u128 = ai[i..ki].iter().collect::<String>().parse().unwrap_or(0);
+                    let nb: u128 = bi[j..kj].iter().collect::<String>().parse().unwrap_or(0);
+                    if na != nb {
+                        return na.cmp(&nb);
+                    }
+                    i = ki;
+                    j = kj;
+                } else {
+                    if x != y {
+                        return x.cmp(y);
+                    }
+                    i += 1;
+                    j += 1;
+                }
+            }
+        }
+    }
+}
+
 fn list_profiles() -> Result<Vec<ProfileSummary>, String> {
     let dir = mock_dir();
     if !dir.exists() {
@@ -190,11 +235,26 @@ fn list_profiles() -> Result<Vec<ProfileSummary>, String> {
             if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                 if let Ok(profile) = load_profile(name) {
                     let running = running_servers().lock().unwrap().contains_key(name);
+                    // у профилей, созданных до появления поля, историей считается
+                    // mtime файла
+                    let created_at = if profile.created_at > 0.0 {
+                        profile.created_at
+                    } else {
+                        fs::metadata(&path)
+                            .and_then(|m| m.modified())
+                            .map(|t| {
+                                t.duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs_f64()
+                            })
+                            .unwrap_or(0.0)
+                    };
                     out.push(ProfileSummary {
                         name: name.to_string(),
                         listen_port: profile.listen_port,
                         running,
                         rules: profile.rules.len(),
+                        created_at,
                     });
                 }
             }
@@ -203,12 +263,40 @@ fn list_profiles() -> Result<Vec<ProfileSummary>, String> {
     Ok(out)
 }
 
+/// unix-секунды сейчас: метка создания профиля
+fn unix_now() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
+}
+
+/// Порядок списка профилей: история (по времени создания) по умолчанию,
+/// `order=alpha` — по имени; `dir=desc` — реверс (запрос пользователя 17.11.2026).
+fn sort_profiles(v: &mut Vec<ProfileSummary>, order: &str, dir: &str) {
+    use std::cmp::Ordering;
+    if order == "alpha" {
+        v.sort_by(|a, b| natural_cmp(&a.name, &b.name));
+    } else {
+        v.sort_by(|a, b| {
+            a.created_at
+                .partial_cmp(&b.created_at)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| natural_cmp(&a.name, &b.name))
+        });
+    }
+    if dir == "desc" {
+        v.reverse();
+    }
+}
+
 #[derive(Serialize)]
 struct ProfileSummary {
     name: String,
     listen_port: u16,
     running: bool,
     rules: usize,
+    created_at: f64,
 }
 
 fn record_traffic(name: &str, entry: TrafficEntry) {
@@ -415,8 +503,19 @@ fn json_error(msg: &str, status: StatusCode) -> Response {
         .unwrap()
 }
 
-async fn profiles_handler() -> Json<Value> {
-    let profiles = list_profiles().unwrap_or_default();
+#[derive(Deserialize)]
+struct ListQuery {
+    order: Option<String>,
+    dir: Option<String>,
+}
+
+async fn profiles_handler(Query(q): Query<ListQuery>) -> Json<Value> {
+    let mut profiles = list_profiles().unwrap_or_default();
+    sort_profiles(
+        &mut profiles,
+        q.order.as_deref().unwrap_or("history"),
+        q.dir.as_deref().unwrap_or("asc"),
+    );
     Json(serde_json::json!({ "profiles": profiles }))
 }
 
@@ -431,12 +530,17 @@ async fn profile_get_handler(Query(q): Query<NameQuery>) -> Response {
     }
 }
 
-async fn profile_post_handler(Json(profile): Json<Profile>) -> Response {
+async fn profile_post_handler(Json(mut profile): Json<Profile>) -> Response {
     if sanitize_name(&profile.name).is_err() {
         return json_error("invalid name", StatusCode::BAD_REQUEST);
     }
     if profile.listen_port == 0 {
         return json_error("invalid port", StatusCode::BAD_REQUEST);
+    }
+    // время ставится один раз, при первом сохранении: повторное сохранение
+    // существующего профиля историю не сдвигает
+    if profile.created_at == 0.0 {
+        profile.created_at = unix_now();
     }
     if let Err(e) = save_profile(&profile) {
         return json_error(&e, StatusCode::BAD_REQUEST);
@@ -452,8 +556,10 @@ async fn profile_delete_handler(Json(body): Json<DeleteBody>) -> Response {
     };
     stop_server(&name).await;
     let path = profile_path(&name);
+    // existed в записи: «удалено» и «такого профиля не было» различимы в журнале.
+    let existed = path.exists();
     let _ = fs::remove_file(path);
-    crate::control::log_action("mock", "profile.delete", serde_json::json!({"name": name}));
+    crate::control::log_action("mock", "profile.delete", serde_json::json!({"name": name, "existed": existed}));
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
@@ -474,7 +580,11 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
     // bind до ответа: 200 только если порт реально занят
     let listener = match TcpListener::bind(("127.0.0.1", port)).await {
         Ok(l) => l,
-        Err(e) => return json_error(&format!("bind {port}: {e}"), StatusCode::BAD_GATEWAY),
+        Err(e) => {
+            let msg = format!("bind {port}: {e}");
+            crate::control::log_action("mock", "start.fail", serde_json::json!({"name": name, "port": port, "error": msg}));
+            return json_error(&msg, StatusCode::BAD_GATEWAY);
+        }
     };
     let handle = tokio::spawn(async move {
         run_mock_server(listener, name_clone).await;
@@ -564,15 +674,80 @@ async fn run_mock_server(listener: TcpListener, name: String) {
     running_servers().lock().unwrap().remove(&removing);
 }
 
+// ---------- интерфейс для API отладки (src/debug_api.rs) ----------
+// Те же пути, что у пользовательских ручек /debug/mock/*, только без HTTP-обёртки.
+
+/// Все сохранённые профили mock: имя -> полный JSON профиля.
+pub(crate) fn profiles_map() -> serde_json::Map<String, Value> {
+    let mut map = serde_json::Map::new();
+    let dir = match fs::read_dir(mock_dir()) {
+        Ok(d) => d,
+        Err(_) => return map,
+    };
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let name = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if let Ok(profile) = load_profile(&name) {
+            if let Ok(value) = serde_json::to_value(&profile) {
+                map.insert(name, value);
+            }
+        }
+    }
+    map
+}
+
+/// Снимок трафика по всем профилям mock.
+pub(crate) fn traffic_snapshot() -> serde_json::Map<String, Value> {
+    let mut map = serde_json::Map::new();
+    let store = traffic_store().lock().unwrap();
+    for (name, deque) in store.iter() {
+        let items: Vec<Value> = deque
+            .iter()
+            .filter_map(|t| serde_json::to_value(t).ok())
+            .collect();
+        map.insert(name.clone(), Value::Array(items));
+    }
+    map
+}
+
+pub(crate) fn clear_traffic() {
+    traffic_store().lock().unwrap().clear();
+}
+
+/// Сохранение профиля mock из JSON той же схемы, что читает /debug/mock/profile.
+pub(crate) fn save_profile_value(value: &Value) -> Result<(), String> {
+    let profile: Profile = serde_json::from_value(value.clone())
+        .map_err(|e| format!("схема профиля: {e}"))?;
+    sanitize_name(&profile.name)?;
+    save_profile(&profile)
+}
+
+/// Удаление профиля: сначала остановить сервер, потом снять файл.
+pub(crate) async fn delete_profile(name: &str) -> Result<(), String> {
+    let name = sanitize_name(name)?;
+    let path = profile_path(&name);
+    if !path.exists() {
+        return Err(format!("профиль «{name}» не найден"));
+    }
+    stop_server(&name).await;
+    fs::remove_file(path).map_err(|e| format!("удаление {name}: {e}"))
+}
+
 pub fn control_router<S: Clone + Send + Sync + 'static>() -> Router<S> {
     Router::new()
-        .route("/api/mock/profiles", get(profiles_handler))
-        .route("/api/mock/profile", get(profile_get_handler))
-        .route("/api/mock/profile", post(profile_post_handler))
-        .route("/api/mock/profile/delete", post(profile_delete_handler))
-        .route("/api/mock/start", post(start_handler))
-        .route("/api/mock/stop", post(stop_handler))
-        .route("/api/mock/status", get(status_handler))
-        .route("/api/mock/traffic", get(traffic_handler))
-        .route("/api/mock/preview", post(preview_handler))
+        .route("/debug/mock/profiles", get(profiles_handler))
+        .route("/debug/mock/profile", get(profile_get_handler))
+        .route("/debug/mock/profile", post(profile_post_handler))
+        .route("/debug/mock/profile/delete", post(profile_delete_handler))
+        .route("/debug/mock/start", post(start_handler))
+        .route("/debug/mock/stop", post(stop_handler))
+        .route("/debug/mock/status", get(status_handler))
+        .route("/debug/mock/traffic", get(traffic_handler))
+        .route("/debug/mock/preview", post(preview_handler))
 }

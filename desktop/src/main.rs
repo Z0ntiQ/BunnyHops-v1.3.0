@@ -83,6 +83,18 @@ fn main() {
             .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("ошибка запуска Bunny Hops");
+        // Последняя запись журнала — на RunEvent::Exit: он приходит на ЛЮБОМ
+        // пути выхода (закрытие окна, Cmd+Q, osascript quit). Проверено
+        // 17.11.2026: на quit-путь WindowEvent::Destroyed не приходит.
+        .build(tauri::generate_context!())
+        .expect("ошибка запуска Bunny Hops")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                use std::sync::atomic::{AtomicBool, Ordering};
+                static STOP_LOGGED: AtomicBool = AtomicBool::new(false);
+                if !STOP_LOGGED.swap(true, Ordering::SeqCst) {
+                    bunny_hops_server::control::log_simple("server", "stop");
+                }
+            }
+        });
 }

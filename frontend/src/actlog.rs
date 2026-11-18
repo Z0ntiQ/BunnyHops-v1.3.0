@@ -44,11 +44,9 @@ struct TEntry {
 }
 
 pub async fn fetch_traffic_log() -> Vec<String> {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return Vec::new(),
+    let Ok(promise) = crate::util::ui_fetch("/debug/mock/traffic", None, None) else {
+        return Vec::new();
     };
-    let promise = win.fetch_with_str("/api/mock/traffic");
     let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
         return Vec::new();
     };
@@ -81,11 +79,9 @@ pub async fn fetch_traffic_log() -> Vec<String> {
 
 /// Серверный журнал действий, старые первыми (панель показывает реверсом).
 pub async fn fetch_action_log() -> Vec<String> {
-    let win = match web_sys::window() {
-        Some(w) => w,
-        None => return Vec::new(),
+    let Ok(promise) = crate::util::ui_fetch("/debug/logs", None, None) else {
+        return Vec::new();
     };
-    let promise = win.fetch_with_str("/api/action-log");
     let Ok(val) = wasm_bindgen_futures::JsFuture::from(promise).await else {
         return Vec::new();
     };

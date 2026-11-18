@@ -1,5 +1,6 @@
-// Bunny Hops — тонкий headless-бинарь (API-движок: /proxy, мок, /api/eyes): env-контракт
-// BUNNY_HOPS_DIST/PORT; UI — только окно Tauri (app/desktop/), браузер не открывается.
+// Bunny Hops — тонкий headless-бинарь (API-движок: /debug/*, минимальный API /api/status +
+// /api/debug-mode); env-контракт BUNNY_HOPS_DIST/PORT; UI — только окно Tauri (app/desktop/),
+// браузер не открывается.
 // Логика сервера — в lib.rs (run_server), оттуда же её берёт Tauri-оболочка desktop/.
 use bunny_hops_server::run_server;
 use std::env;
