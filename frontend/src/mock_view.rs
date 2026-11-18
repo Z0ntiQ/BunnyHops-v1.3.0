@@ -4,8 +4,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::Response;
 
-use crate::mock_nav::{MockNav, NavKind, NavSel};
 use crate::http_status::{status_label, STATUS_CLASSES};
+use crate::mock_nav::{MockNav, NavKind, NavSel};
 
 /// Строка JSON с заменой всех токенов {{...}} на 1: токен вне кавычек —
 /// заглушка-число, токен внутри строки остаётся частью строки.
@@ -134,20 +134,20 @@ async fn fetch_json_post(url: &str, body: &Value) -> Result<Value, String> {
 
 #[component]
 pub fn ProxyView() -> impl IntoView {
-    let profiles = create_rw_signal(Vec::<Value>::new());
-    let selected_profile = create_rw_signal(Option::<String>::None);
-    let profile_data = create_rw_signal(Value::Null);
-    let rules = create_rw_signal(Vec::<Value>::new());
-    let selected_rule_idx = create_rw_signal(Option::<usize>::None);
-    let variants = create_rw_signal(Vec::<Value>::new());
-    let selected_variant_idx = create_rw_signal(Option::<usize>::None);
-    let nav_sel = create_rw_signal(Option::<NavSel>::None);
+    let profiles = RwSignal::new(Vec::<Value>::new());
+    let selected_profile = RwSignal::new(Option::<String>::None);
+    let profile_data = RwSignal::new(Value::Null);
+    let rules = RwSignal::new(Vec::<Value>::new());
+    let selected_rule_idx = RwSignal::new(Option::<usize>::None);
+    let variants = RwSignal::new(Vec::<Value>::new());
+    let selected_variant_idx = RwSignal::new(Option::<usize>::None);
+    let nav_sel = RwSignal::new(Option::<NavSel>::None);
     // Какое правило сейчас развёрнуто в центре; открыто всегда не больше одного.
-    let open_rule = create_rw_signal(Option::<usize>::None);
-    let status_msg = create_rw_signal(String::new());
-    let status_err = create_rw_signal(false);
-    let new_profile_open = create_rw_signal(false);
-    let new_profile_name = create_rw_signal(String::new());
+    let open_rule = RwSignal::new(Option::<usize>::None);
+    let status_msg = RwSignal::new(String::new());
+    let status_err = RwSignal::new(false);
+    let new_profile_open = RwSignal::new(false);
+    let new_profile_name = RwSignal::new(String::new());
     let open_new_profile = move || {
         new_profile_name.set(String::new());
         new_profile_open.update(|o| *o = !*o);
@@ -161,14 +161,14 @@ pub fn ProxyView() -> impl IntoView {
     });
     // Модалка нового правила: тип совпадения и код ответа; название правила
     // ставится автоматически по коду из таблицы статусов REST (17.11.2026).
-    let rule_name_open = create_rw_signal(false);
-    let rule_method_draft = create_rw_signal("*".to_string());
-    let rule_match_draft = create_rw_signal("prefix".to_string());
-    let rule_status_draft = create_rw_signal("200".to_string());
+    let rule_name_open = RwSignal::new(false);
+    let rule_method_draft = RwSignal::new("*".to_string());
+    let rule_match_draft = RwSignal::new("prefix".to_string());
+    let rule_status_draft = RwSignal::new("200".to_string());
     // Порядок списка профилей: по умолчанию история создания; иконки в шапке
     // переключают алфавитный порядок и направление (запрос пользователя 17.11.2026).
-    let sort_alpha = create_rw_signal(false);
-    let sort_desc = create_rw_signal(false);
+    let sort_alpha = RwSignal::new(false);
+    let sort_desc = RwSignal::new(false);
 
     let load_profiles = move || {
         let order = if sort_alpha.get() { "alpha" } else { "history" };
@@ -221,15 +221,18 @@ pub fn ProxyView() -> impl IntoView {
 
     // ----- Debug-мост: выбор mock-профиля командами отладочного API -----
     {
-        let lp = load_profile.clone();
-        let sp = selected_profile.clone();
+        let lp = load_profile;
+        let sp = selected_profile;
         crate::debug_bridge::register_setter("mock.selected", move |v| match v.as_str() {
             Some(name) if !name.is_empty() => lp(name.to_string()),
             _ => sp.set(None),
         });
-        let sp = selected_profile.clone();
-        let snap_mock_id = crate::debug_bridge::register_snapshot("mock", move || serde_json::json!({ "selected": sp.try_get().flatten() }));
-        let sp = selected_profile.clone();
+        let sp = selected_profile;
+        let snap_mock_id = crate::debug_bridge::register_snapshot(
+            "mock",
+            move || serde_json::json!({ "selected": sp.try_get().flatten() }),
+        );
+        let sp = selected_profile;
         let reset_id = crate::debug_bridge::register_reset(move || sp.set(None));
         // Размонтирование вкладки Mock: убираем все регистрации этой вьюхи.
         // Иначе снимки и команды читают удалённые сигналы и останавливают
@@ -263,7 +266,7 @@ pub fn ProxyView() -> impl IntoView {
         });
     };
 
-    let del_profile_confirm = create_rw_signal(None::<String>);
+    let del_profile_confirm = RwSignal::new(None::<String>);
 
     let delete_profile = move |name: String| {
         spawn_local(async move {
@@ -528,7 +531,6 @@ pub fn ProxyView() -> impl IntoView {
                     .and_then(|x| x.as_str())
                     .map(|s| s.to_string());
                 let out = vars.clone();
-                drop(vars);
                 if let Some(id) = first_id {
                     rule.insert("active_variant".into(), Value::String(id));
                 }
@@ -588,7 +590,6 @@ pub fn ProxyView() -> impl IntoView {
             variants.set(vars_clone);
         }
     };
-
 
     let _on_profile_change = move |ev: web_sys::Event| {
         let val = input_value(ev);
@@ -682,8 +683,8 @@ pub fn ProxyView() -> impl IntoView {
     });
 
     // ----- Центральная колонка: один логический блок на выбранный узел дерева -----
-    let sv_pick = select_variant.clone();
-    let sr_pick = select_rule.clone();
+    let sv_pick = select_variant;
+    let sr_pick = select_rule;
     let pick = move |sel: NavSel| match sel.kind {
         NavKind::Connect => nav_sel.set(Some(sel)),
         NavKind::Match => {
@@ -702,8 +703,8 @@ pub fn ProxyView() -> impl IntoView {
             nav_sel.set(Some(sel));
         }
     };
-    let av_nav = add_variant.clone();
-    let sr_nav = select_rule.clone();
+    let av_nav = add_variant;
+    let sr_nav = select_rule;
     let nav_add_variant = move |ri: usize| {
         if selected_rule_idx.get_untracked() != Some(ri) {
             sr_nav(ri);
@@ -748,9 +749,8 @@ pub fn ProxyView() -> impl IntoView {
         }.into_any()
     };
     // Доступ к полям правила/варианта прямо из JSON правил, по индексам.
-    let rfield = move |ri: usize, key: &str| -> Option<Value> {
-        rules.get().get(ri)?.get(key).cloned()
-    };
+    let rfield =
+        move |ri: usize, key: &str| -> Option<Value> { rules.get().get(ri)?.get(key).cloned() };
     // Опция помечается выбранной по значению правила. При первом монтировании
     // карточки из модалки prop:value срабатывает до вставки option-элементов,
     // и браузер оставляет первую опцию (баг модалки нового правила, 17.11.2026).
@@ -777,7 +777,7 @@ pub fn ProxyView() -> impl IntoView {
     // сопоставления и список вариантов; каждый вариант — вложенный спойлер,
     // новый вариант создаётся кнопкой «+» в теле правила.
     let rules_panel = move || -> AnyView {
-        let ar_h = add_rule_cb.clone();
+        let ar_h = add_rule_cb;
         view! {
             <div class="px-block">
                 <div class="px-h-row">
@@ -795,10 +795,10 @@ pub fn ProxyView() -> impl IntoView {
                         key=|(_, r)| r.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string()
                         children=move |(ri, _rule)| {
                             let om = open_rule;
-                            let sr2 = select_rule.clone();
-                            let dr2 = delete_rule.clone();
-                            let sp2 = save_profile.clone();
-                            let navav2 = nav_add_variant.clone();
+                            let sr2 = select_rule;
+                            let dr2 = delete_rule;
+                            let sp2 = save_profile;
+                            let navav2 = nav_add_variant;
                             view! {
                                 <details data-bh=format!("rule.row.{ri}") class="mrule"
                                     open=move || om.get() == Some(ri)>
@@ -832,7 +832,7 @@ pub fn ProxyView() -> impl IntoView {
                                             let Some(r) = rs.get(ri) else { return view! { <div></div> }.into_any() };
                                             let enabled = r.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true);
                                             let vars = r.get("variants").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-                                            if enabled && !vars.iter().any(|v| var_bad(v)) {
+                                            if enabled && !vars.iter().any(var_bad) {
                                                 return view! { <div></div> }.into_any();
                                             }
                                             view! { <span class="mnav-dot" title="Правило выключено или вариант с битыми данными"/> }.into_any()
@@ -910,9 +910,9 @@ pub fn ProxyView() -> impl IntoView {
                                                 }
                                                 key=|(_, v)| v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string()
                                                 children=move |(vi, _v)| {
-                                                    let sr3 = select_rule.clone();
-                                                    let sv2 = select_variant.clone();
-                                                    let dv2 = delete_variant.clone();
+                                                    let sr3 = select_rule;
+                                                    let sv2 = select_variant;
+                                                    let dv2 = delete_variant;
                                                     view! {
                                                         <details data-bh=format!("variant.row.{ri}.{vi}") class="mvar"
                                                             open=move || selected_rule_idx.get() == Some(ri) && selected_variant_idx.get() == Some(vi)>

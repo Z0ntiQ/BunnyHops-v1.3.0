@@ -143,7 +143,10 @@ fn rand_date(offset: i64) -> String {
     } else {
         now - Duration::from_secs((-offset) as u64 * 86400)
     };
-    let secs = target.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = target
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     // Простое форматирование YYYY-MM-DD через chrono не доступно, делаем вручную
     // Используем стандартную библиотеку: переводим в tm через gmtime (unsafe) — проще: форматируем через time crate? Нельзя.
     // Реализуем простой расчёт дней от эпохи.
@@ -152,14 +155,18 @@ fn rand_date(offset: i64) -> String {
     let mut d = days as i64;
     loop {
         let dy = if is_leap(y) { 366 } else { 365 };
-        if d < dy { break; }
+        if d < dy {
+            break;
+        }
         d -= dy;
         y += 1;
     }
     let mut m = 1;
     let dim = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut dim2 = dim;
-    if is_leap(y) { dim2[1] = 29; }
+    if is_leap(y) {
+        dim2[1] = 29;
+    }
     while d >= dim2[m - 1] {
         d -= dim2[m - 1];
         m += 1;
@@ -192,14 +199,18 @@ fn rand_float(min: f64, max: f64, dec: u32) -> String {
 }
 
 fn rand_pick(options: &[&str]) -> String {
-    if options.is_empty() { return String::new(); }
+    if options.is_empty() {
+        return String::new();
+    }
     options[(next_u32() % options.len() as u32) as usize].to_string()
 }
 
 // --- Парсинг токена ---
 fn parse_token(content: &str) -> Option<String> {
     let content = content.trim();
-    if content.is_empty() { return None; }
+    if content.is_empty() {
+        return None;
+    }
 
     // {{int:MIN:MAX}}
     if let Some(rest) = content.strip_prefix("int:") {
@@ -214,7 +225,11 @@ fn parse_token(content: &str) -> Option<String> {
     else if let Some(rest) = content.strip_prefix("float:") {
         let parts: Vec<&str> = rest.split(':').collect();
         if parts.len() == 3 {
-            if let (Ok(min), Ok(max), Ok(dec)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>(), parts[2].parse::<u32>()) {
+            if let (Ok(min), Ok(max), Ok(dec)) = (
+                parts[0].parse::<f64>(),
+                parts[1].parse::<f64>(),
+                parts[2].parse::<u32>(),
+            ) {
                 if dec <= 9 {
                     return Some(rand_float(min, max, dec));
                 }
@@ -284,20 +299,22 @@ fn parse_token(content: &str) -> Option<String> {
 
 /// Заменяет все токены {{...}} в тексте. Неизвестный токен остаётся как есть.
 pub fn randomize_text(src: &str) -> String {
-    if src.is_empty() { return String::new(); }
+    if src.is_empty() {
+        return String::new();
+    }
     let mut out = String::with_capacity(src.len());
     let mut i = 0;
     let bytes = src.as_bytes();
     while i < bytes.len() {
-        if i + 3 < bytes.len() && bytes[i] == b'{' && bytes[i+1] == b'{' {
+        if i + 3 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
             // ищем закрывающие }}
             let mut j = i + 2;
-            while j + 1 < bytes.len() && !(bytes[j] == b'}' && bytes[j+1] == b'}') {
+            while j + 1 < bytes.len() && !(bytes[j] == b'}' && bytes[j + 1] == b'}') {
                 j += 1;
             }
             if j + 1 < bytes.len() {
                 // токен найден
-                let token_content = std::str::from_utf8(&bytes[i+2..j]).unwrap_or("");
+                let token_content = std::str::from_utf8(&bytes[i + 2..j]).unwrap_or("");
                 if let Some(replacement) = parse_token(token_content) {
                     out.push_str(&replacement);
                 } else {
@@ -318,7 +335,17 @@ pub fn randomize_text(src: &str) -> String {
 
 /// Длина UTF-8 последовательности по ведущему байту.
 fn utf8_len(b: u8) -> usize {
-    if b < 0x80 { 1 } else if b >> 5 == 0b110 { 2 } else if b >> 4 == 0b1110 { 3 } else if b >> 3 == 0b11110 { 4 } else { 1 }
+    if b < 0x80 {
+        1
+    } else if b >> 5 == 0b110 {
+        2
+    } else if b >> 4 == 0b1110 {
+        3
+    } else if b >> 3 == 0b11110 {
+        4
+    } else {
+        1
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +389,9 @@ mod tests {
         let s = "{{string:12}}";
         let r = randomize_text(s);
         assert_eq!(r.len(), 12);
-        assert!(r.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(r
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
     }
 
     #[test]

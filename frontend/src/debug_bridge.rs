@@ -21,10 +21,16 @@ use web_sys::{MessageEvent, Response, WebSocket};
 // заимствование в этот момент паниковало и убивало весь wasm (инцидент 18.11.2026,
 // «Новый профиль ничего не делает»).
 
+// Колбэки мостика: общий язык — serde_json::Value, чтобы мостик не зависел от
+// типов конкретных экранов.
+type SetterFn = Rc<dyn Fn(Value)>;
+type SnapshotPart = (u64, String, Rc<dyn Fn() -> Value>);
+type ResetFn = Rc<dyn Fn()>;
+
 thread_local! {
-    static SETTERS: RefCell<HashMap<String, Rc<dyn Fn(Value)>>> = RefCell::new(HashMap::new());
-    static SNAPSHOTS: RefCell<Vec<(u64, String, Rc<dyn Fn() -> Value>)>> = const { RefCell::new(Vec::new()) };
-    static RESETS: RefCell<Vec<(u64, Rc<dyn Fn()>)>> = const { RefCell::new(Vec::new()) };
+    static SETTERS: RefCell<HashMap<String, SetterFn>> = RefCell::new(HashMap::new());
+    static SNAPSHOTS: RefCell<Vec<SnapshotPart>> = const { RefCell::new(Vec::new()) };
+    static RESETS: RefCell<Vec<(u64, ResetFn)>> = const { RefCell::new(Vec::new()) };
     static CLICKS: RefCell<HashMap<String, Rc<dyn Fn()>>> = RefCell::new(HashMap::new());
     static NEXT_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
 }
@@ -58,7 +64,10 @@ pub fn unregister_click(name: &str) {
 /// 18.11.2026: закрытие вкладки Mock останавливало снимки и карту BROOP).
 pub fn register_snapshot(prefix: &str, build: impl Fn() -> Value + 'static) -> u64 {
     let id = next_id();
-    SNAPSHOTS.with(|s| s.borrow_mut().push((id, prefix.to_string(), Rc::new(build))));
+    SNAPSHOTS.with(|s| {
+        s.borrow_mut()
+            .push((id, prefix.to_string(), Rc::new(build)))
+    });
     id
 }
 
@@ -101,8 +110,7 @@ fn click_names() -> Vec<Value> {
 
 fn snapshot() -> Value {
     let mut root = serde_json::Map::new();
-    let parts: Vec<(u64, String, Rc<dyn Fn() -> Value>)> =
-        SNAPSHOTS.with(|parts| parts.borrow().clone());
+    let parts: Vec<SnapshotPart> = SNAPSHOTS.with(|parts| parts.borrow().clone());
     for (_, name, build) in parts {
         // Защита от паники: забытая регистрация после размонтирования читает
         // удалённый сигнал; такой вклад пропускаем, остальной снапшот жив.
@@ -296,10 +304,12 @@ async fn delay(ms: i32) {
         let callback = Closure::once_into_js(move || {
             let _ = resolve.call0(&JsValue::NULL);
         });
-        let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
-            callback.unchecked_ref::<js_sys::Function>(),
-            ms,
-        );
+        let _ = web_sys::window()
+            .unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                callback.unchecked_ref::<js_sys::Function>(),
+                ms,
+            );
     });
     let _ = JsFuture::from(promise).await;
 }
@@ -315,8 +325,15 @@ async fn push_elements_now() {
 async fn connection() -> Result<(), JsValue> {
     let win = web_sys::window().ok_or("no window")?;
     let loc = win.location();
-    let proto = if loc.protocol().unwrap_or_default() == "https:" { "wss" } else { "ws" };
-    let url = format!("{proto}://{}/debug/stream?src=ui", loc.host().unwrap_or_default());
+    let proto = if loc.protocol().unwrap_or_default() == "https:" {
+        "wss"
+    } else {
+        "ws"
+    };
+    let url = format!(
+        "{proto}://{}/debug/stream?src=ui",
+        loc.host().unwrap_or_default()
+    );
     let ws = WebSocket::new(&url)?;
 
     let opened = js_sys::Promise::new(&mut |resolve, reject| {
@@ -372,6 +389,6 @@ async fn connection() -> Result<(), JsValue> {
     // Первый снапшот сразу после рукопожатия: backend читает ui.* сразу после hello.
     post_snapshot().await;
     let _ = JsFuture::from(closed).await;
-    let _ = win.clear_interval_with_handle(pulse_id);
+    win.clear_interval_with_handle(pulse_id);
     Ok(())
 }

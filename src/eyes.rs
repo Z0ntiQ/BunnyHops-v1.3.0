@@ -76,7 +76,12 @@ pub async fn eyes_handler(Query(q): Query<HashMap<String, String>>) -> Response 
         "X-Frame-Path",
         HeaderValue::from_str(&path).unwrap_or_else(|_| HeaderValue::from_static("")),
     );
-    (headers, [(axum::http::header::CONTENT_TYPE, "image/png")], png).into_response()
+    (
+        headers,
+        [(axum::http::header::CONTENT_TYPE, "image/png")],
+        png,
+    )
+        .into_response()
 }
 
 pub struct Frame {
@@ -174,9 +179,8 @@ fn capture_own_window_impl(full: bool) -> Result<Frame, String> {
         let area = d
             .find(&key_bounds)
             .map(|v| {
-                let b: CFDictionary<CFString, CFType> = unsafe {
-                    CFDictionary::wrap_under_get_rule(v.as_CFTypeRef() as *const _)
-                };
+                let b: CFDictionary<CFString, CFType> =
+                    unsafe { CFDictionary::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
                 let w = real(&key_w, &b).unwrap_or(0.0).max(0.0);
                 let h = real(&key_h, &b).unwrap_or(0.0).max(0.0);
                 let x = real(&key_x, &b).unwrap_or(0.0);

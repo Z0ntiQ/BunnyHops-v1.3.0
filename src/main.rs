@@ -13,7 +13,9 @@ async fn main() {
         Ok(d) => PathBuf::from(d),
         Err(_) => {
             let exe = env::current_exe().unwrap_or_default();
-            exe.parent().map(|p| p.join("dist")).unwrap_or_else(|| PathBuf::from("dist"))
+            exe.parent()
+                .map(|p| p.join("dist"))
+                .unwrap_or_else(|| PathBuf::from("dist"))
         }
     };
     // PORT не задан — порт рандомизируется ядром; задан — строгий bind на него.

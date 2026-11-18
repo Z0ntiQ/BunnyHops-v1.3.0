@@ -1,8 +1,8 @@
 //! storage: вынесено из app.rs (атомарные модули, правило пользователя 13.11.2026).
 
-use wasm_bindgen::JsCast;
 use crate::logic::*;
 use crate::types::*;
+use wasm_bindgen::JsCast;
 
 pub const LS_STEPS: &str = "hoplite.steps";
 pub const LS_VARS: &str = "hoplite.vars";

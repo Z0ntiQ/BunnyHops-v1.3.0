@@ -57,8 +57,11 @@ pub(crate) fn read_store(file: &str) -> Value {
 pub(crate) fn write_store(file: &str, value: &Value) -> Result<(), String> {
     let dir = state_dir();
     let _ = fs::create_dir_all(&dir);
-    fs::write(dir.join(file), serde_json::to_string_pretty(value).unwrap_or_default())
-        .map_err(|e| format!("не удалось записать {file}: {e}"))
+    fs::write(
+        dir.join(file),
+        serde_json::to_string_pretty(value).unwrap_or_default(),
+    )
+    .map_err(|e| format!("не удалось записать {file}: {e}"))
 }
 
 pub(crate) fn history_store() -> &'static Mutex<Vec<Value>> {
@@ -86,7 +89,10 @@ fn load_action_log() -> Vec<Value> {
 }
 
 fn now_epoch() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn push_capped(store: &Mutex<Vec<Value>>, rec: Value, cap: usize) {
@@ -167,7 +173,8 @@ pub async fn api_access_middleware(req: Request, next: axum::middleware::Next) -
     let path = req.uri().path().to_string();
     let started = Instant::now();
     let response = next.run(req).await;
-    let in_scope = path.starts_with("/api/") || path.starts_with("/debug/") || path == "/screenshot";
+    let in_scope =
+        path.starts_with("/api/") || path.starts_with("/debug/") || path == "/screenshot";
     if !in_scope {
         return response;
     }
@@ -225,7 +232,12 @@ async fn log_post_handler(State(_state): State<AppState>, req: Request) -> Respo
     };
     let input: NoteIn = match serde_json::from_value(body) {
         Ok(v) => v,
-        Err(e) => return err(StatusCode::BAD_REQUEST, &format!("{{\"msg\": \"...\"}}: {e}")),
+        Err(e) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                &format!("{{\"msg\": \"...\"}}: {e}"),
+            )
+        }
     };
     log_action("ui", "note", json!({"msg": input.msg}));
     json_response(StatusCode::OK, &json!({"ok": true}))
@@ -287,7 +299,10 @@ async fn profiles_post_handler(State(_state): State<AppState>, req: Request) -> 
         "updated_at": now_epoch(),
     });
     let mut created = true;
-    if let Some(pos) = list.iter().position(|p| p.get("name").and_then(Value::as_str) == Some(&name)) {
+    if let Some(pos) = list
+        .iter()
+        .position(|p| p.get("name").and_then(Value::as_str) == Some(&name))
+    {
         list[pos] = entry.clone();
         created = false;
     } else {
@@ -297,8 +312,15 @@ async fn profiles_post_handler(State(_state): State<AppState>, req: Request) -> 
     if let Err(e) = write_store("profiles.json", &doc) {
         return err(StatusCode::INTERNAL_SERVER_ERROR, &e);
     }
-    log_action("profiles", if created { "create" } else { "update" }, json!({"name": name}));
-    json_response(StatusCode::OK, &json!({"ok": true, "created": created, "profile": entry}))
+    log_action(
+        "profiles",
+        if created { "create" } else { "update" },
+        json!({"name": name}),
+    );
+    json_response(
+        StatusCode::OK,
+        &json!({"ok": true, "created": created, "profile": entry}),
+    )
 }
 
 async fn profiles_activate_handler(State(_state): State<AppState>, req: Request) -> Response {
@@ -306,10 +328,22 @@ async fn profiles_activate_handler(State(_state): State<AppState>, req: Request)
         Ok(b) => b,
         Err(r) => return r,
     };
-    let name = body.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let mut doc = profiles_doc();
-    if !name.is_empty() && !profiles_list(&doc).iter().any(|p| p.get("name").and_then(Value::as_str) == Some(&name)) {
-        return err(StatusCode::NOT_FOUND, &format!("профиль «{name}» не найден"));
+    if !name.is_empty()
+        && !profiles_list(&doc)
+            .iter()
+            .any(|p| p.get("name").and_then(Value::as_str) == Some(&name))
+    {
+        return err(
+            StatusCode::NOT_FOUND,
+            &format!("профиль «{name}» не найден"),
+        );
     }
     doc["active"] = json!(name);
     if let Err(e) = write_store("profiles.json", &doc) {
@@ -324,7 +358,12 @@ async fn profiles_delete_handler(State(_state): State<AppState>, req: Request) -
         Ok(b) => b,
         Err(r) => return r,
     };
-    let name = body.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if name.is_empty() {
         return err(StatusCode::BAD_REQUEST, "нужно имя профиля");
     }
@@ -335,7 +374,10 @@ async fn profiles_delete_handler(State(_state): State<AppState>, req: Request) -
         .filter(|p| p.get("name").and_then(Value::as_str) != Some(&name))
         .collect();
     if kept.len() == before {
-        return err(StatusCode::NOT_FOUND, &format!("профиль «{name}» не найден"));
+        return err(
+            StatusCode::NOT_FOUND,
+            &format!("профиль «{name}» не найден"),
+        );
     }
     doc["profiles"] = Value::Array(kept);
     if doc.get("active").and_then(Value::as_str) == Some(&name) {
@@ -371,7 +413,12 @@ struct RequestIn {
 }
 
 fn resolve_target(input: &RequestIn) -> Result<String, String> {
-    if let Some(url) = input.url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+    if let Some(url) = input
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
         return Ok(url.to_string());
     }
     let doc = profiles_doc();
@@ -395,7 +442,12 @@ fn resolve_target(input: &RequestIn) -> Result<String, String> {
         .filter(|b| !b.is_empty())
         .ok_or_else(|| format!("у профиля «{wanted}» пустой base_url"))?;
     let mut target = base.trim_end_matches('/').to_string();
-    if let Some(path) = input.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+    if let Some(path) = input
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
         target.push('/');
         target.push_str(path.trim_start_matches('/'));
     }
@@ -403,7 +455,10 @@ fn resolve_target(input: &RequestIn) -> Result<String, String> {
         let pairs: Vec<String> = query
             .iter()
             .map(|(k, v)| {
-                let value = v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
+                let value = v
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| v.to_string());
                 format!("{k}={value}")
             })
             .collect();
@@ -429,7 +484,12 @@ async fn request_post_handler(State(state): State<AppState>, req: Request) -> Re
         Err(e) => return err(StatusCode::BAD_REQUEST, &e),
     };
     let method = Method::from_bytes(
-        input.method.as_deref().unwrap_or("GET").to_uppercase().as_bytes(),
+        input
+            .method
+            .as_deref()
+            .unwrap_or("GET")
+            .to_uppercase()
+            .as_bytes(),
     )
     .map_err(|_| ())
     .unwrap_or(Method::GET);
@@ -498,7 +558,11 @@ async fn request_post_handler(State(state): State<AppState>, req: Request) -> Re
         }),
         HISTORY_CAP,
     );
-    log_action("request", "send", json!({"method": method.as_str(), "url": target, "status": outcome.get("status")}));
+    log_action(
+        "request",
+        "send",
+        json!({"method": method.as_str(), "url": target, "status": outcome.get("status")}),
+    );
     let status = if outcome.get("error").is_some() {
         StatusCode::BAD_GATEWAY
     } else {
@@ -515,7 +579,10 @@ async fn history_get_handler(State(_state): State<AppState>) -> Response {
         .rev()
         .cloned()
         .collect();
-    json_response(StatusCode::OK, &json!({"ok": true, "items": items, "total": items.len()}))
+    json_response(
+        StatusCode::OK,
+        &json!({"ok": true, "items": items, "total": items.len()}),
+    )
 }
 
 async fn history_clear_handler(State(_state): State<AppState>) -> Response {
@@ -532,7 +599,11 @@ async fn history_clear_handler(State(_state): State<AppState>) -> Response {
 
 async fn theme_get_handler(State(_state): State<AppState>) -> Response {
     let doc = read_store("theme.json");
-    let mode = doc.get("mode").and_then(Value::as_str).unwrap_or("dark").to_string();
+    let mode = doc
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("dark")
+        .to_string();
     json_response(StatusCode::OK, &json!({"ok": true, "mode": mode}))
 }
 
@@ -541,7 +612,12 @@ async fn theme_post_handler(State(_state): State<AppState>, req: Request) -> Res
         Ok(b) => b,
         Err(r) => return r,
     };
-    let mode = body.get("mode").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let mode = body
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if !["dark", "light"].contains(&mode.as_str()) {
         return err(StatusCode::BAD_REQUEST, "mode должен быть dark или light");
     }
@@ -577,10 +653,7 @@ async fn debug_mode_post_handler(State(_state): State<AppState>, req: Request) -
 
 async fn status_get_handler(State(_state): State<AppState>) -> Response {
     let doc = profiles_doc();
-    let uptime = STARTED
-        .get()
-        .map(|t| t.elapsed().as_secs())
-        .unwrap_or(0);
+    let uptime = STARTED.get().map(|t| t.elapsed().as_secs()).unwrap_or(0);
     json_response(
         StatusCode::OK,
         &json!({
@@ -605,7 +678,10 @@ async fn status_get_handler(State(_state): State<AppState>) -> Response {
 pub fn control_router() -> Router<AppState> {
     Router::new()
         .route("/api/status", get(status_get_handler))
-        .route("/api/debug-mode", axum::routing::post(debug_mode_post_handler).get(debug_mode_get_handler))
+        .route(
+            "/api/debug-mode",
+            axum::routing::post(debug_mode_post_handler).get(debug_mode_get_handler),
+        )
 }
 
 /// Функциональная поверхность MCP (под гейтом debug_api::gate_or_ui).

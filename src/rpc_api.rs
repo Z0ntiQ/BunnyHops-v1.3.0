@@ -213,7 +213,9 @@ async fn rpc_handler(
             });
             control::json_response(StatusCode::OK, &resp)
         }
-        Err((code, message, data)) => json_rpc_error_response(Some(id), code, &message, data, StatusCode::OK),
+        Err((code, message, data)) => {
+            json_rpc_error_response(Some(id), code, &message, data, StatusCode::OK)
+        }
     }
 }
 
@@ -240,13 +242,19 @@ fn json_rpc_error_response(
 // ===== Обработчики методов =====
 
 /// system.get_state — возвращает полное состояние приложения.
-async fn handle_system_get_state(_state: &AppState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_system_get_state(
+    _state: &AppState,
+    _params: Option<Value>,
+) -> Result<Value, (i32, String, Option<Value>)> {
     // Используем существующую функцию debug_api::full_state()
     Ok(debug_api::full_state())
 }
 
 /// ui.inspect — возвращает BROOP-карту (как GET /debug/broop).
-async fn handle_ui_inspect(_state: &AppState, _params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_inspect(
+    _state: &AppState,
+    _params: Option<Value>,
+) -> Result<Value, (i32, String, Option<Value>)> {
     let doc = debug_api::broop_doc();
     let catalog: Vec<Value> = doc
         .get("objects")
@@ -268,7 +276,10 @@ async fn handle_ui_inspect(_state: &AppState, _params: Option<Value>) -> Result<
             for el in hits {
                 let mut merged = obj.clone();
                 if let Some(o) = merged.as_object_mut() {
-                    o.insert("declared_as".into(), obj.get("id").cloned().unwrap_or(Value::Null));
+                    o.insert(
+                        "declared_as".into(),
+                        obj.get("id").cloned().unwrap_or(Value::Null),
+                    );
                     o.insert("id".into(), json!(debug_api::element_id(el)));
                     o.insert("state".into(), el.clone());
                 }
@@ -279,9 +290,12 @@ async fn handle_ui_inspect(_state: &AppState, _params: Option<Value>) -> Result<
     let undeclared: Vec<&Value> = live
         .iter()
         .filter(|el| {
-            !catalog
-                .iter()
-                .any(|o| debug_api::matches_catalog(o.get("id").and_then(Value::as_str).unwrap_or(""), debug_api::element_id(el)))
+            !catalog.iter().any(|o| {
+                debug_api::matches_catalog(
+                    o.get("id").and_then(Value::as_str).unwrap_or(""),
+                    debug_api::element_id(el),
+                )
+            })
         })
         .collect();
     let unmarked = debug_api::live_unmarked();
@@ -295,8 +309,44 @@ async fn handle_ui_inspect(_state: &AppState, _params: Option<Value>) -> Result<
     }))
 }
 
+/// Клик по элементу и ожидание RPC-эха.
+async fn click_and_wait_rpc(id: &str) -> Value {
+    let seq_before = debug_api::ui_seq();
+    debug_api::publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
+    wait_ui_echo_rpc(seq_before).await
+}
+
+/// JSON-RPC-ошибка на отказ гейта; after_refresh — что карта уже обновлялась round-trip'ом.
+fn rpc_gate_err(
+    id: &str,
+    r: debug_api::GateReject,
+    after_refresh: bool,
+) -> (i32, String, Option<Value>) {
+    let (msg, trace) = match r {
+        debug_api::GateReject::NotFound => (
+            if after_refresh {
+                format!("Object '{id}' not on screen after map refresh; map — GET /debug/broop")
+            } else {
+                format!("Object '{id}' not on screen; map — GET /debug/broop")
+            },
+            "gate_check NotFound",
+        ),
+        debug_api::GateReject::Disabled => {
+            (format!("Object '{id}' is disabled"), "gate_check Disabled")
+        }
+        debug_api::GateReject::Invisible => (
+            format!("Object '{id}' is invisible"),
+            "gate_check Invisible",
+        ),
+    };
+    (-32603, msg, Some(json!({"stacktrace": trace})))
+}
+
 /// ui.click — клик по элементу BROOP по id.
-async fn handle_ui_click(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_click(
+    _state: &AppState,
+    params: Option<Value>,
+) -> Result<Value, (i32, String, Option<Value>)> {
     let id = params
         .as_ref()
         .and_then(|p| p.get("id"))
@@ -304,73 +354,52 @@ async fn handle_ui_click(_state: &AppState, params: Option<Value>) -> Result<Val
         .ok_or((-32602, "Missing required parameter: id".to_string(), None))?;
 
     match debug_api::gate_check(id) {
-        Ok(_) => {
-            let seq_before = debug_api::ui_seq();
-            debug_api::publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
-            let result = wait_ui_echo_rpc(seq_before).await;
-            Ok(result)
-        }
+        Ok(_) => Ok(click_and_wait_rpc(id).await),
         Err(debug_api::GateReject::NotFound) => {
             debug_api::publish(json!({"type": "action", "action": "elements.collect"}));
             let rx = debug_api::register_elements_wait(id);
-            let wait_result = tokio::time::timeout(std::time::Duration::from_millis(2000), rx).await;
-            if wait_result.is_err() {
+            if tokio::time::timeout(std::time::Duration::from_millis(2000), rx)
+                .await
+                .is_err()
+            {
                 return Err((
                     -32603,
-                    format!("Object '{}' not on screen; map — GET /debug/broop (map refresh timeout)", id),
+                    format!(
+                        "Object '{}' not on screen; map — GET /debug/broop (map refresh timeout)",
+                        id
+                    ),
                     Some(json!({"stacktrace": "gate_check NotFound after round-trip timeout"})),
                 ));
             }
             match debug_api::gate_check(id) {
-                Ok(_) => {
-                    let seq_before = debug_api::ui_seq();
-                    debug_api::publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
-                    let result = wait_ui_echo_rpc(seq_before).await;
-                    Ok(result)
-                }
-                Err(debug_api::GateReject::NotFound) => Err((
-                    -32603,
-                    format!("Object '{}' not on screen after map refresh; map — GET /debug/broop", id),
-                    Some(json!({"stacktrace": "gate_check NotFound after round-trip"})),
-                )),
-                Err(debug_api::GateReject::Disabled) => Err((
-                    -32603,
-                    format!("Object '{}' is disabled", id),
-                    Some(json!({"stacktrace": "gate_check Disabled"})),
-                )),
-                Err(debug_api::GateReject::Invisible) => Err((
-                    -32603,
-                    format!("Object '{}' is invisible", id),
-                    Some(json!({"stacktrace": "gate_check Invisible"})),
-                )),
+                Ok(_) => Ok(click_and_wait_rpc(id).await),
+                Err(r) => Err(rpc_gate_err(id, r, true)),
             }
         }
-        Err(debug_api::GateReject::Disabled) => Err((
-            -32603,
-            format!("Object '{}' is disabled", id),
-            Some(json!({"stacktrace": "gate_check Disabled"})),
-        )),
-        Err(debug_api::GateReject::Invisible) => Err((
-            -32603,
-            format!("Object '{}' is invisible", id),
-            Some(json!({"stacktrace": "gate_check Invisible"})),
-        )),
+        Err(r) => Err(rpc_gate_err(id, r, false)),
     }
 }
 
 /// ui.type — установка текста в элемент.
-async fn handle_ui_type(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_type(
+    _state: &AppState,
+    params: Option<Value>,
+) -> Result<Value, (i32, String, Option<Value>)> {
     let id = params
         .as_ref()
         .and_then(|p| p.get("id"))
         .and_then(Value::as_str)
         .ok_or((-32602, "Missing required parameter: id".to_string(), None))?;
-    let text = params
-        .as_ref()
-        .and_then(|p| p.get("text"))
-        .ok_or((-32602, "Missing required parameter: text".to_string(), None))?;
+    let text = params.as_ref().and_then(|p| p.get("text")).ok_or((
+        -32602,
+        "Missing required parameter: text".to_string(),
+        None,
+    ))?;
 
-    if debug_api::live_elements().into_iter().all(|el| debug_api::element_id(&el) != id) {
+    if debug_api::live_elements()
+        .into_iter()
+        .all(|el| debug_api::element_id(&el) != id)
+    {
         return Err((
             -32603,
             format!("Object '{}' not on screen; map — GET /debug/broop", id),
@@ -389,12 +418,19 @@ async fn handle_ui_type(_state: &AppState, params: Option<Value>) -> Result<Valu
 }
 
 /// ui.wait — ожидание условия через общее ядро debug_api::wait_for_predicate.
-async fn handle_ui_wait(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_ui_wait(
+    _state: &AppState,
+    params: Option<Value>,
+) -> Result<Value, (i32, String, Option<Value>)> {
     let predicate = params
         .as_ref()
         .and_then(|p| p.get("predicate"))
         .cloned()
-        .ok_or((-32602, "Missing required parameter: predicate".to_string(), None))?;
+        .ok_or((
+            -32602,
+            "Missing required parameter: predicate".to_string(),
+            None,
+        ))?;
     let timeout_ms = params
         .as_ref()
         .and_then(|p| p.get("timeout_ms"))
@@ -404,12 +440,19 @@ async fn handle_ui_wait(_state: &AppState, params: Option<Value>) -> Result<Valu
 }
 
 /// app.execute — выполнение действия из реестра debug_api (ui.set, ui.reset, ui.click, element.click, element.set, eval, traffic.clear, logs.clear).
-async fn handle_app_execute(_state: &AppState, params: Option<Value>) -> Result<Value, (i32, String, Option<Value>)> {
+async fn handle_app_execute(
+    _state: &AppState,
+    params: Option<Value>,
+) -> Result<Value, (i32, String, Option<Value>)> {
     let action = params
         .as_ref()
         .and_then(|p| p.get("action"))
         .and_then(Value::as_str)
-        .ok_or((-32602, "Missing required parameter: action".to_string(), None))?;
+        .ok_or((
+            -32602,
+            "Missing required parameter: action".to_string(),
+            None,
+        ))?;
     let payload = params
         .as_ref()
         .and_then(|p| p.get("payload"))
@@ -417,22 +460,16 @@ async fn handle_app_execute(_state: &AppState, params: Option<Value>) -> Result<
         .unwrap_or(json!({}));
 
     if !debug_api::is_known_action(action) {
-        return Err((
-            -32601,
-            format!("Unknown action '{}'", action),
-            None,
-        ));
+        return Err((-32601, format!("Unknown action '{}'", action), None));
     }
 
     let (before, after, result) = debug_api::run_action(action, payload).await;
     let diff = debug_api::json_diff(&before, &after);
     match result {
-        Ok(data) => Ok(json!({"ok": true, "status": "ok", "action": action, "result": data, "stateDiff": diff})),
-        Err((status, message)) => Err((
-            -32603,
-            message,
-            Some(json!({"status": status.as_u16()})),
-        )),
+        Ok(data) => Ok(
+            json!({"ok": true, "status": "ok", "action": action, "result": data, "stateDiff": diff}),
+        ),
+        Err((status, message)) => Err((-32603, message, Some(json!({"status": status.as_u16()})))),
     }
 }
 
@@ -514,34 +551,59 @@ mod tests {
     #[tokio::test]
     async fn rpc_requires_bearer() {
         let router = test_rpc_router("secret123");
-        let (status, body) = rpc_call(&router, None, "system.get_state", None, Some(json!(1))).await;
+        let (status, body) =
+            rpc_call(&router, None, "system.get_state", None, Some(json!(1))).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"]["code"], -32600);
-        assert!(body["error"]["message"].as_str().unwrap().contains("Bearer token required"));
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Bearer token required"));
     }
 
     #[tokio::test]
     async fn rpc_unknown_method_is_32601() {
         let router = test_rpc_router("secret123");
-        let (status, body) = rpc_call(&router, Some("secret123"), "unknown.method", None, Some(json!(1))).await;
+        let (status, body) = rpc_call(
+            &router,
+            Some("secret123"),
+            "unknown.method",
+            None,
+            Some(json!(1)),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["error"]["code"], -32601);
-        assert!(body["error"]["message"].as_str().unwrap().contains("not found"));
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
     }
 
     #[tokio::test]
     async fn rpc_missing_params_is_32602() {
         let router = test_rpc_router("secret123");
-        let (status, body) = rpc_call(&router, Some("secret123"), "ui.click", None, Some(json!(1))).await;
+        let (status, body) =
+            rpc_call(&router, Some("secret123"), "ui.click", None, Some(json!(1))).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["error"]["code"], -32602);
-        assert!(body["error"]["message"].as_str().unwrap().contains("Missing required parameter"));
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Missing required parameter"));
     }
 
     #[tokio::test]
     async fn rpc_get_state_returns_result() {
         let router = test_rpc_router("secret123");
-        let (status, body) = rpc_call(&router, Some("secret123"), "system.get_state", None, Some(json!(1))).await;
+        let (status, body) = rpc_call(
+            &router,
+            Some("secret123"),
+            "system.get_state",
+            None,
+            Some(json!(1)),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert!(body["result"].is_object());
         assert!(body["result"]["app"].is_object());
@@ -556,7 +618,14 @@ mod tests {
             "predicate": {"kind": "element", "id": "no.such.element", "state": "absent"},
             "timeout_ms": 500,
         });
-        let (status, body) = rpc_call(&router, Some("secret123"), "ui.wait", Some(params), Some(json!(1))).await;
+        let (status, body) = rpc_call(
+            &router,
+            Some("secret123"),
+            "ui.wait",
+            Some(params),
+            Some(json!(1)),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["result"]["ok"], true);
         assert_eq!(body["result"]["matched"]["state"], "absent");
@@ -565,7 +634,14 @@ mod tests {
     #[tokio::test]
     async fn rpc_ui_wait_requires_predicate() {
         let router = test_rpc_router("secret123");
-        let (status, body) = rpc_call(&router, Some("secret123"), "ui.wait", Some(json!({})), Some(json!(1))).await;
+        let (status, body) = rpc_call(
+            &router,
+            Some("secret123"),
+            "ui.wait",
+            Some(json!({})),
+            Some(json!(1)),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["error"]["code"], -32602);
     }

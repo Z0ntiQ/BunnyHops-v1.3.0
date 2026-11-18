@@ -9,7 +9,6 @@ use crate::mock_view::ProxyView;
 use crate::stream::{do_stream, err_message, is_abort_err, RespUpdate};
 use crate::ui::*;
 
-
 use crate::actlog::*;
 use crate::debug_bridge;
 use crate::method_select::*;
@@ -25,15 +24,21 @@ use crate::util::*;
 
 pub fn App() -> impl IntoView {
     /* ---------- state (зеркало useState из App.jsx) ---------- */
-    let method = create_rw_signal("GET".to_string());
-    let search_q = create_rw_signal(String::new());
-    let search_hits = create_rw_signal(0i64);
+    let method = RwSignal::new("GET".to_string());
+    let search_q = RwSignal::new(String::new());
+    let search_hits = RwSignal::new(0i64);
     /* ---------- поиск-кнопка (стиль command-button): пилюля + mod+K ---------- */
-    let search_open = create_rw_signal(false);
-    let held_mod = create_rw_signal(false);
-    let held_k = create_rw_signal(false);
+    let search_open = RwSignal::new(false);
+    let held_mod = RwSignal::new(false);
+    let held_k = RwSignal::new(false);
     let mac = web_sys::window()
-        .and_then(|w| js_sys::Reflect::get(&JsValue::from(w.navigator()), &JsValue::from_str("platform")).ok())
+        .and_then(|w| {
+            js_sys::Reflect::get(
+                &JsValue::from(w.navigator()),
+                &JsValue::from_str("platform"),
+            )
+            .ok()
+        })
         .and_then(|v| v.as_string())
         .unwrap_or_default()
         .to_lowercase()
@@ -45,9 +50,9 @@ pub fn App() -> impl IntoView {
         hop_search("");
         search_open.set(false);
     };
-    let url = create_rw_signal(String::new());
+    let url = RwSignal::new(String::new());
     // Живой плейсхолдер URL-поля (17.11.2026): подсказка печатается, когда поле пустое.
-    let ph_hint = create_rw_signal(String::new());
+    let ph_hint = RwSignal::new(String::new());
     {
         fn sleep_ms(ms: i32) -> impl std::future::Future<Output = ()> {
             let promise = js_sys::Promise::new(&mut |resolve, _reject| {
@@ -75,35 +80,35 @@ pub fn App() -> impl IntoView {
             }
         });
     }
-    let params = create_rw_signal(Vec::<KvRow>::new());
-    let headers = create_rw_signal(Vec::<KvRow>::new());
-    let body = create_rw_signal(String::new());
-    let tab = create_rw_signal("params".to_string());
-    let mock_mode = create_rw_signal(false);
-    let resp_tab = create_rw_signal("body".to_string());
-    let pretty = create_rw_signal(true);
-    let loading = create_rw_signal(false);
-    let response = create_rw_signal(None::<RespState>);
-    let error = create_rw_signal(None::<String>);
-    let copied_req = create_rw_signal(false);
-    let copied_resp = create_rw_signal(false);
-    let scale_idx = create_rw_signal(load_scale_idx());
-    let query = create_rw_signal(String::new());
-    let match_idx = create_rw_signal(0usize);
-    let steps = create_rw_signal(load_steps());
-    let running = create_rw_signal(false);
-    let open_step_id = create_rw_signal(None::<String>);
-    let vars = create_rw_signal(load_vars());
-    let saved = create_rw_signal(load_saved());
-    let active_tab = create_rw_signal(None::<String>);
-    let flash = create_rw_signal(None::<(String, u32)>);
-    let del_confirm = create_rw_signal(None::<String>);
-    let api_calls = create_rw_signal(Vec::<ApiCall>::new());
-    let api_panel = create_rw_signal(false);
+    let params = RwSignal::new(Vec::<KvRow>::new());
+    let headers = RwSignal::new(Vec::<KvRow>::new());
+    let body = RwSignal::new(String::new());
+    let tab = RwSignal::new("params".to_string());
+    let mock_mode = RwSignal::new(false);
+    let resp_tab = RwSignal::new("body".to_string());
+    let pretty = RwSignal::new(true);
+    let loading = RwSignal::new(false);
+    let response = RwSignal::new(None::<RespState>);
+    let error = RwSignal::new(None::<String>);
+    let copied_req = RwSignal::new(false);
+    let copied_resp = RwSignal::new(false);
+    let scale_idx = RwSignal::new(load_scale_idx());
+    let query = RwSignal::new(String::new());
+    let match_idx = RwSignal::new(0usize);
+    let steps = RwSignal::new(load_steps());
+    let running = RwSignal::new(false);
+    let open_step_id = RwSignal::new(None::<String>);
+    let vars = RwSignal::new(load_vars());
+    let saved = RwSignal::new(load_saved());
+    let active_tab = RwSignal::new(None::<String>);
+    let flash = RwSignal::new(None::<(String, u32)>);
+    let del_confirm = RwSignal::new(None::<String>);
+    let api_calls = RwSignal::new(Vec::<ApiCall>::new());
+    let api_panel = RwSignal::new(false);
     // короткий лог действий в подвале: что упало и на каком шаге
-    let act_log = create_rw_signal(Vec::<String>::new());
-    let log_open = create_rw_signal(false);
-    let log_h = create_rw_signal(
+    let act_log = RwSignal::new(Vec::<String>::new());
+    let log_open = RwSignal::new(false);
+    let log_h = RwSignal::new(
         ls_get(LS_LOG_H)
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(150),
@@ -137,9 +142,9 @@ pub fn App() -> impl IntoView {
         });
     });
     // панель «Трафик»: все запросы mock-движка по всем профилям; опрос всегда.
-    let trf_log = create_rw_signal(Vec::<String>::new());
-    let trf_open = create_rw_signal(false);
-    let trf_h = create_rw_signal(
+    let trf_log = RwSignal::new(Vec::<String>::new());
+    let trf_open = RwSignal::new(false);
+    let trf_h = RwSignal::new(
         ls_get(LS_TRF_H)
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(150),
@@ -153,19 +158,19 @@ pub fn App() -> impl IntoView {
             }
         });
     });
-    let groups = create_rw_signal(load_groups());
-    let group_modal = create_rw_signal(false);
-    let group_name = create_rw_signal(String::new());
-    let modal_open = create_rw_signal(false);
-    let modal_name = create_rw_signal(String::new());
-    let modal_err = create_rw_signal(String::new());
-    let cloud_full = create_rw_signal(false);
-    let abort_ctrl = create_rw_signal(None::<web_sys::AbortController>);
-    let run_abort_ctrl = create_rw_signal(None::<web_sys::AbortController>);
-    let timer_id = create_rw_signal(None::<i32>);
+    let groups = RwSignal::new(load_groups());
+    let group_modal = RwSignal::new(false);
+    let group_name = RwSignal::new(String::new());
+    let modal_open = RwSignal::new(false);
+    let modal_name = RwSignal::new(String::new());
+    let modal_err = RwSignal::new(String::new());
+    let cloud_full = RwSignal::new(false);
+    let abort_ctrl = RwSignal::new(None::<web_sys::AbortController>);
+    let run_abort_ctrl = RwSignal::new(None::<web_sys::AbortController>);
+    let timer_id = RwSignal::new(None::<i32>);
 
     // ----- Debug-мост: живое состояние формы запроса для тестовых инструментов -----
-    let debug_on = create_rw_signal(false);
+    let debug_on = RwSignal::new(false);
     let toggle_mock = move || mock_mode.update(|m| *m = !*m);
     let toggle_debug = move || {
         let on = !debug_on.get_untracked();
@@ -176,10 +181,15 @@ pub fn App() -> impl IntoView {
         });
     };
     {
-        debug_bridge::register_setter("request.url", move |v| url.set(v.as_str().unwrap_or("").to_string()));
+        debug_bridge::register_setter("request.url", move |v| {
+            url.set(v.as_str().unwrap_or("").to_string())
+        });
         debug_bridge::register_setter("request.method", move |v| {
             let m = v.as_str().unwrap_or("GET").trim().to_uppercase();
-            if matches!(m.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS") {
+            if matches!(
+                m.as_str(),
+                "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+            ) {
                 method.set(m);
             }
         });
@@ -240,7 +250,10 @@ pub fn App() -> impl IntoView {
         move || serde_json::to_string(&steps.get()).unwrap_or_default(),
         move |ser, _, _| {
             // пустой список не пишем, чтобы не затирать сохранённые сценарии (как в оригинале)
-            if serde_json::from_str::<Vec<Step>>(ser).map(|v| !v.is_empty()).unwrap_or(false) {
+            if serde_json::from_str::<Vec<Step>>(ser)
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
+            {
                 ls_set(LS_STEPS, ser);
             }
         },
@@ -268,8 +281,13 @@ pub fn App() -> impl IntoView {
     );
 
     /* ---------- derived ---------- */
-    let enabled_params =
-        Memo::new(move |_| params.get().iter().filter(|p| p.on && !p.key.trim().is_empty()).count());
+    let enabled_params = Memo::new(move |_| {
+        params
+            .get()
+            .iter()
+            .filter(|p| p.on && !p.key.trim().is_empty())
+            .count()
+    });
     let vars_map = Memo::new(move |_| {
         let mut m = HashMap::new();
         for v in vars.get() {
@@ -289,7 +307,11 @@ pub fn App() -> impl IntoView {
         params.set(rows.clone());
         let base = split_url(&url.get_untracked()).base;
         let qs = params_to_query(&rows);
-        url.set(if qs.is_empty() { base } else { format!("{base}?{qs}") });
+        url.set(if qs.is_empty() {
+            base
+        } else {
+            format!("{base}?{qs}")
+        });
     });
     let on_url_change = Callback::new(move |v: String| {
         url.set(v.clone());
@@ -321,7 +343,11 @@ pub fn App() -> impl IntoView {
             cancelled: false,
             image_blob_url: None,
         });
-        let resp_body = if snap.is_textual { snap.body_text.clone() } else { String::new() };
+        let resp_body = if snap.is_textual {
+            snap.body_text.clone()
+        } else {
+            String::new()
+        };
         let mut list = saved.get_untracked();
         // редактор привязан к открытой вкладке и нового имени не ввели:
         // явное сохранение обновляет эту вкладку на месте
@@ -371,7 +397,11 @@ pub fn App() -> impl IntoView {
                 .trim_start_matches("http://")
                 .trim_end_matches('/')
                 .to_string();
-            if name.is_empty() { base } else { name }
+            if name.is_empty() {
+                base
+            } else {
+                name
+            }
         };
         let item = SavedReq {
             id: new_id(),
@@ -412,7 +442,7 @@ pub fn App() -> impl IntoView {
         modal_open.set(true);
     });
     // приглашение сохранить: есть живой запрос и ни одна вкладка ему не равна
-    let invite_save = create_memo(move |_| {
+    let invite_save = Memo::new(move |_| {
         let u = url.get();
         if u.trim().is_empty() {
             return false;
@@ -420,9 +450,10 @@ pub fn App() -> impl IntoView {
         let m = method.get();
         let h = headers.get();
         let b = body.get();
-        !saved.get().into_iter().any(|r| {
-            r.method == m && r.url == u && r.headers == h && r.body == b
-        })
+        !saved
+            .get()
+            .into_iter()
+            .any(|r| r.method == m && r.url == u && r.headers == h && r.body == b)
     });
     let load_saved_req = Callback::new(move |id: String| {
         if let Some(r) = saved.get_untracked().into_iter().find(|r| r.id == id) {
@@ -504,7 +535,10 @@ pub fn App() -> impl IntoView {
         });
     });
     let load_api_call = Callback::new(move |c: ApiCall| {
-        logit(format!("\u{25c7} \u{432}\u{44b}\u{437}\u{43e}\u{432} API: {} {}", c.method, c.url));
+        logit(format!(
+            "\u{25c7} \u{432}\u{44b}\u{437}\u{43e}\u{432} API: {} {}",
+            c.method, c.url
+        ));
         api_panel.set(false);
         active_tab.set(None);
         method.set(c.method.clone());
@@ -516,9 +550,9 @@ pub fn App() -> impl IntoView {
     refresh_api.run(());
 
     /* автосохранение ответа: отклик пишется в активную вкладку, чип вспыхивает.
-       Запрос (метод/URL/заголовки/тело) во вкладку не пишем: иначе любое
-       правка после загрузки вкладки молча перезаписала бы сохранённый запрос,
-       а «сохранить как новую» всегда давало бы ложный дубликат. */
+    Запрос (метод/URL/заголовки/тело) во вкладку не пишем: иначе любое
+    правка после загрузки вкладки молча перезаписала бы сохранённый запрос,
+    а «сохранить как новую» всегда давало бы ложный дубликат. */
     let _ = Effect::watch(
         move || {
             let resp = response.get();
@@ -528,7 +562,9 @@ pub fn App() -> impl IntoView {
             if prev.is_none() {
                 return;
             }
-            let Some(id) = active_tab.get_untracked() else { return };
+            let Some(id) = active_tab.get_untracked() else {
+                return;
+            };
             let (status, is_textual, body_text, streaming) =
                 st.clone().unwrap_or((0, false, String::new(), false));
             if streaming {
@@ -578,23 +614,26 @@ pub fn App() -> impl IntoView {
             cf.set(cloud_overflow());
         }) as Box<dyn FnMut()>);
         if let Some(w) = web_sys::window() {
-            let _ = w.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
+            let _ =
+                w.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
         }
         on_resize.forget();
     }
 
     /* ---------- copy ---------- */
-    let mark_copied = |copied: RwSignal<bool>| Callback::new(move |_: ()| {
-        copied.set(true);
-        let cb = Closure::wrap(Box::new(move || copied.set(false)) as Box<dyn FnMut()>);
-        if let Some(w) = web_sys::window() {
-            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                cb.as_ref().unchecked_ref(),
-                1200,
-            );
-        }
-        cb.forget();
-    });
+    let mark_copied = |copied: RwSignal<bool>| {
+        Callback::new(move |_: ()| {
+            copied.set(true);
+            let cb = Closure::wrap(Box::new(move || copied.set(false)) as Box<dyn FnMut()>);
+            if let Some(w) = web_sys::window() {
+                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    cb.as_ref().unchecked_ref(),
+                    1200,
+                );
+            }
+            cb.forget();
+        })
+    };
 
     /* ---------- send / stop ---------- */
     let send = Callback::new(move |_: ()| {
@@ -638,7 +677,7 @@ pub fn App() -> impl IntoView {
             };
             // Троттлинг: large-ответы приходят десятками чанков, а перерисовка
             // тела на каждом чанке — O(чанки × размер) и вешает вкладку.
-            let paint_at = create_rw_signal(0f64);
+            let paint_at = RwSignal::new(0f64);
             let on_chunk = move |bytes: u64, text: String| {
                 let now = js_now();
                 if now - paint_at.get_untracked() < 150.0 {
@@ -659,7 +698,10 @@ pub fn App() -> impl IntoView {
                         error.set(Some(out.text));
                         logit(format!("\u{2715} {t}"));
                     } else {
-                        logit(format!("\u{2190} {} \u{00b7} {:.0} ms \u{00b7} {} \u{411}", out.status, out.time_ms, out.bytes));
+                        logit(format!(
+                            "\u{2190} {} \u{00b7} {:.0} ms \u{00b7} {} \u{411}",
+                            out.status, out.time_ms, out.bytes
+                        ));
                         response.update(|r| {
                             if let Some(resp) = r.as_mut() {
                                 resp.bytes = out.bytes;
@@ -687,7 +729,10 @@ pub fn App() -> impl IntoView {
                     } else {
                         let t = err_message(&e);
                         error.set(Some(t.clone()));
-                        logit(format!("\u{2715} {}", t.chars().take(120).collect::<String>()));
+                        logit(format!(
+                            "\u{2715} {}",
+                            t.chars().take(120).collect::<String>()
+                        ));
                     }
                 }
             }
@@ -840,7 +885,12 @@ pub fn App() -> impl IntoView {
                     })
                     .collect();
                 let body_t = tpl_global(&step.body, &merged);
-                logit(format!("\u{25b6} \u{448}\u{430}\u{433} {}: {} {}", i + 1, step.method, target));
+                logit(format!(
+                    "\u{25b6} \u{448}\u{430}\u{433} {}: {} {}",
+                    i + 1,
+                    step.method,
+                    target
+                ));
                 let signal = ctrl.signal().clone();
                 let res = do_stream(
                     &target,
@@ -854,7 +904,10 @@ pub fn App() -> impl IntoView {
                 .await;
                 match res {
                     Ok(out) if out.network_error => {
-                        logit(format!("\u{2717} \u{448}\u{430}\u{433} {}: \u{441}\u{435}\u{442}\u{44c}", i + 1));
+                        logit(format!(
+                            "\u{2717} \u{448}\u{430}\u{433} {}: \u{441}\u{435}\u{442}\u{44c}",
+                            i + 1
+                        ));
                         update_step(&steps, id, |s| {
                             s.status = "fail".into();
                             s.result = Some(StepResult {
@@ -866,32 +919,37 @@ pub fn App() -> impl IntoView {
                         });
                     }
                     Ok(out) => {
-                        logit(format!("\u{2190} \u{448}\u{430}\u{433} {}: {} \u{00b7} {:.0} ms", i + 1, out.status, out.time_ms));
+                        logit(format!(
+                            "\u{2190} \u{448}\u{430}\u{433} {}: {} \u{00b7} {:.0} ms",
+                            i + 1,
+                            out.status,
+                            out.time_ms
+                        ));
                         let ok = out.status < 400;
                         let mut capture_note = String::new();
                         let mut captured_val: Option<(String, String)> = None;
                         if !step.capture_name.is_empty() && ok {
                             match serde_json::from_str::<serde_json::Value>(&out.text) {
                                 Ok(v) => {
-                                    let path =
-                                        if step.capture_path.is_empty() { "$" } else { &step.capture_path };
+                                    let path = if step.capture_path.is_empty() {
+                                        "$"
+                                    } else {
+                                        &step.capture_path
+                                    };
                                     match extract_by_path(&v, path) {
                                         Ok(val) => {
-                                            let short: String =
-                                                val.chars().take(24).collect();
+                                            let short: String = val.chars().take(24).collect();
                                             capture_note =
                                                 format!(" {}:={}", step.capture_name, short);
                                             captured_val = Some((step.capture_name.clone(), val));
                                         }
                                         Err(e) => {
-                                            capture_note =
-                                                format!(" {}: {}", step.capture_name, e);
+                                            capture_note = format!(" {}: {}", step.capture_name, e);
                                         }
                                     }
                                 }
                                 Err(e) => {
-                                    capture_note =
-                                        format!(" {}: {}", step.capture_name, e);
+                                    capture_note = format!(" {}: {}", step.capture_name, e);
                                 }
                             }
                         }
@@ -955,9 +1013,7 @@ pub fn App() -> impl IntoView {
     );
     let search = Memo::new(move |_| {
         let resp = response.get();
-        let Some(resp) = resp.as_ref().filter(|r| r.is_textual) else {
-            return None;
-        };
+        let resp = resp.as_ref().filter(|r| r.is_textual)?;
         let shown: String = if resp.streaming {
             resp.body_text.clone()
         } else {
@@ -973,7 +1029,11 @@ pub fn App() -> impl IntoView {
             .split('\n')
             .map(|t| {
                 let is_json = resp.content_type.contains("json");
-                let segs = if is_json { build_segments } else { plain_segments }(t, &query.get(), &mut || {
+                let segs = if is_json {
+                    build_segments
+                } else {
+                    plain_segments
+                }(t, &query.get(), &mut || {
                     let v = total;
                     total += 1;
                     v
@@ -1049,7 +1109,11 @@ pub fn App() -> impl IntoView {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
-            let Some(el) = doc.query_selector(&format!("[data-step=\"{id}\"]")).ok().flatten() else {
+            let Some(el) = doc
+                .query_selector(&format!("[data-step=\"{id}\"]"))
+                .ok()
+                .flatten()
+            else {
                 return;
             };
             let opts = web_sys::ScrollIntoViewOptions::new();
@@ -1062,41 +1126,43 @@ pub fn App() -> impl IntoView {
 
     /* ---------- window hotkeys: Ctrl+F, Esc ---------- */
     if let Some(win) = web_sys::window() {
-        let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(move |ev: web_sys::KeyboardEvent| {
-
-        let ctrl = ev.ctrl_key() || ev.meta_key();
-        if ctrl && ev.key().to_lowercase() == "f" {
-            ev.prevent_default();
-            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                if let Some(el) = doc.query_selector("#hop-search-input").ok().flatten() {
-                    let _ = el.dyn_ref::<web_sys::HtmlElement>().map(|el| el.focus());
+        let closure = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+            move |ev: web_sys::KeyboardEvent| {
+                let ctrl = ev.ctrl_key() || ev.meta_key();
+                if ctrl && ev.key().to_lowercase() == "f" {
+                    ev.prevent_default();
+                    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                        if let Some(el) = doc.query_selector("#hop-search-input").ok().flatten() {
+                            let _ = el.dyn_ref::<web_sys::HtmlElement>().map(|el| el.focus());
+                        }
+                    }
+                    return;
                 }
-            }
-            return;
-        }
-        if ev.key() == "Escape" {
-            if api_panel.get_untracked() {
-                api_panel.set(false);
-                return;
-            }
-            let focused_search = web_sys::window()
-                .and_then(|w| w.document())
-                .and_then(|d| d.active_element())
-                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
-                .map(|el| el.id() == "hop-search-input")
-                .unwrap_or(false);
-            if focused_search {
-                query.set(String::new());
-                if let Some(el) = web_sys::window()
-                    .and_then(|w| w.document())
-                    .and_then(|d| d.query_selector("#hop-search-input").ok())
-                    .flatten()
-                {
-                    let _ = el.dyn_ref::<web_sys::HtmlElement>().map(|el| el.blur());
+                if ev.key() == "Escape" {
+                    if api_panel.get_untracked() {
+                        api_panel.set(false);
+                        return;
+                    }
+                    let focused_search = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.active_element())
+                        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                        .map(|el| el.id() == "hop-search-input")
+                        .unwrap_or(false);
+                    if focused_search {
+                        query.set(String::new());
+                        if let Some(el) = web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.query_selector("#hop-search-input").ok())
+                            .flatten()
+                        {
+                            let _ = el.dyn_ref::<web_sys::HtmlElement>().map(|el| el.blur());
+                        }
+                    }
                 }
-            }
-        }
-            }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+            },
+        )
+            as Box<dyn FnMut(web_sys::KeyboardEvent)>);
         let _ = win.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
         closure.forget();
     }
@@ -1104,44 +1170,54 @@ pub fn App() -> impl IntoView {
     /* ---------- поиск-кнопка: mod+K, подсветка клавиш, сворачивание по клику вне ---------- */
     if let Some(win) = web_sys::window() {
         let so = search_open;
-        let kd = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(move |ev: web_sys::KeyboardEvent| {
-            if so.get_untracked() {
-                return;
-            }
-            let m = ev.ctrl_key() || ev.meta_key();
-            let k = ev.key().to_lowercase() == "k";
-            held_mod.set(m);
-            held_k.set(k);
-            if m && k && !ev.repeat() {
-                ev.prevent_default();
-                so.set(true);
-            }
-        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+        let kd = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+            move |ev: web_sys::KeyboardEvent| {
+                if so.get_untracked() {
+                    return;
+                }
+                let m = ev.ctrl_key() || ev.meta_key();
+                let k = ev.key().to_lowercase() == "k";
+                held_mod.set(m);
+                held_k.set(k);
+                if m && k && !ev.repeat() {
+                    ev.prevent_default();
+                    so.set(true);
+                }
+            },
+        )
+            as Box<dyn FnMut(web_sys::KeyboardEvent)>);
         let _ = win.add_event_listener_with_callback("keydown", kd.as_ref().unchecked_ref());
         kd.forget();
-        let ku = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(move |_: web_sys::KeyboardEvent| {
-            held_mod.set(false);
-            held_k.set(false);
-        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+        let ku = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+            move |_: web_sys::KeyboardEvent| {
+                held_mod.set(false);
+                held_k.set(false);
+            },
+        )
+            as Box<dyn FnMut(web_sys::KeyboardEvent)>);
         let _ = win.add_event_listener_with_callback("keyup", ku.as_ref().unchecked_ref());
         ku.forget();
         let cs = close_search;
-        let pd = Closure::<dyn FnMut(web_sys::PointerEvent)>::wrap(Box::new(move |ev: web_sys::PointerEvent| {
-            if !search_open.get_untracked() {
-                return;
-            }
-            let inside = ev.target()
-                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                .and_then(|el| el.closest(".cmd-search").ok().flatten())
-                .is_some();
-            if !inside {
-                cs();
-            }
-        }) as Box<dyn FnMut(web_sys::PointerEvent)>);
+        let pd = Closure::<dyn FnMut(web_sys::PointerEvent)>::wrap(Box::new(
+            move |ev: web_sys::PointerEvent| {
+                if !search_open.get_untracked() {
+                    return;
+                }
+                let inside = ev
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                    .and_then(|el| el.closest(".cmd-search").ok().flatten())
+                    .is_some();
+                if !inside {
+                    cs();
+                }
+            },
+        )
+            as Box<dyn FnMut(web_sys::PointerEvent)>);
         let _ = win.add_event_listener_with_callback("pointerdown", pd.as_ref().unchecked_ref());
         pd.forget();
     }
-    create_effect(move |_| {
+    Effect::new(move |_| {
         if search_open.get() {
             if let Some(el) = web_sys::window()
                 .and_then(|w| w.document())
@@ -1159,7 +1235,7 @@ pub fn App() -> impl IntoView {
     };
 
     // Полный адрес сервера в заголовке окна: document.title Tauri транслирует в title-bar (правило пользователя 17.11.2026).
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let Some(win) = web_sys::window() else { return };
         let host = win.location().host().unwrap_or_default();
         if let Some(doc) = win.document() {
@@ -1169,10 +1245,10 @@ pub fn App() -> impl IntoView {
 
     // Пилюля под активной вкладкой («Tab Pill», дизайн 17.11.2026): эффект пересобирает
     // цель при смене вкладки, показе/скрытии вкладки Body и монтировании/размонтировании трека.
-    let req_track = create_node_ref::<leptos::html::Div>();
-    let resp_track = create_node_ref::<leptos::html::Div>();
+    let req_track = NodeRef::<leptos::html::Div>::new();
+    let resp_track = NodeRef::<leptos::html::Div>::new();
     let mut req_snap = true;
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let t = tab.get();
         let hb = has_body.get();
         if req_track.get().is_none() {
@@ -1184,7 +1260,7 @@ pub fn App() -> impl IntoView {
         req_snap = false;
     });
     let mut resp_snap = true;
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let t = resp_tab.get();
         if resp_track.get().is_none() {
             pill_nav::drop_pill("resp-tabs");
@@ -1202,925 +1278,929 @@ pub fn App() -> impl IntoView {
     /* ---------- render (1:1 с App.jsx) ---------- */
     let url_preview_m = Memo::new(move |_| url_preview(&url.get(), &vars_map.get()));
     let enabled_headers = Memo::new(move |_| {
-        headers.get().iter().filter(|h| h.on && !h.key.trim().is_empty()).count()
+        headers
+            .get()
+            .iter()
+            .filter(|h| h.on && !h.key.trim().is_empty())
+            .count()
     });
 
     view! {
-        <div class="app" style=move || format!("--ui-scale: {}", SCALES[scale_idx.get()])>
-            <header class="topbar">
-                <div class="brand">
-                    <img class="brand-icon" src="/brand.png" alt="" />
-                    <span class="brand-name">"Bunny\u{a0}Hops"</span>
-                </div>
-                <button data-bh="topbar.mock_toggle" class="tab-add"
-                    title="Mock-сервер (BunnyProx)"
-                    style=move || if mock_mode.get() {
-                        "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
-                    } else {
-                        "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
-                    }
-                    on:click=move |_| toggle_mock()>{ "Mock" }</button>
-                <button data-bh="topbar.mcp_toggle" class="tab-add"
-                    title="MCP-гейт: API для тестовых инструментов (/api/debug-mode, /debug/*)"
-                    style=move || if debug_on.get() {
-                        "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
-                    } else {
-                        "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
-                    }
-                    on:click=move |_| toggle_debug()>{ "MCP" }</button>
-                <button data-bh="topbar.tab_save" class={move || if invite_save.get() {
-                        "tab-add invite".to_string()
-                    } else {
-                        "tab-add".to_string()
-                    }}
-                    title="Сохранить текущий запрос как вкладку"
-                    on:click=move |_| open_modal.run(())>
-                    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                        <path d="M11 4v14M4 11h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
-                    </svg>
-                </button>
-                <div class="tab-cloud">
-                    <Show when={move || !api_calls.get().is_empty()}>
-                        <span class="tab-chip tech">
-                            <button data-bh="topbar.api_cloud" class="tab-chip-open"
-                                on:click={move |_| {
-                                    api_panel.update(|v| *v = !*v);
-                                    refresh_api.run(());
-                                }}>
-                                <span class="tab-chip-name">"automation_rules"</span>
-                            </button>
-                            <span class="api-count">{move || api_calls.get().len()}</span>
-                        </span>
-                    </Show>
-                    <For
-                        each={move || saved.get().into_iter().collect::<Vec<_>>()}
-                        key={|r| r.id.clone()}
-                        children={move |r| {
-                            let id = r.id.clone();
-                            // живые данные чипа читаем из saved — автосохранение обновляет их на месте
-                            let cur = {
-                                let id = id.clone();
-                                std::sync::Arc::new(move || {
-                                    saved
-                                        .get()
-                                        .into_iter()
-                                        .find(|x| x.id == id)
-                                        .unwrap_or_else(|| r.clone())
-                                })
-                            };
-                            let cur_cls = std::sync::Arc::clone(&cur);
-                            let cur_title = std::sync::Arc::clone(&cur);
-                            let cur_name = std::sync::Arc::clone(&cur);
-                            let id_cls = id.clone();
-                            view! {
-                                <span class={move || {
-                                    let r = cur_cls();
-                                    let mut c = format!("tab-chip m-{}", r.method);
-                                    if active_tab.get().as_deref() == Some(id_cls.as_str()) {
-                                        c.push_str(" active");
-                                    }
-                                    if let Some((fid, t)) = flash.get() {
-                                        if fid == id_cls {
-                                            c.push_str(&format!(" flash{}", t % 2));
-                                        }
-                                    }
-                                    c
-                                }} title={move || cur_title().url}>
-                                    <button data-bh=format!("tab.chip.{id}") class="tab-chip-open"
-                                        on:click={let id = id.clone(); move |_| load_saved_req.run(id.clone())}>
-                                        <span class="tab-chip-name">{move || cur_name().name}</span>
-                                    </button>
-                                    <button data-bh=format!("tab.delete.{id}") class="tab-chip-del" title="Удалить"
-                                        on:click={let id = id.clone(); move |_| del_confirm.set(Some(id.clone()))}>"✕"</button>
-                                </span>
-                            }
-                        }}
-                    />
-                </div>
-                
-                <div class=move || format!("cmd-search {}", if search_open.get() { "cmd-open" } else if mac { "cmd-mac" } else { "cmd-pc" })>
-                    <Show when={move || !search_open.get()}>
-                        <button data-bh="topbar.search_open" class="cmd-pill" type="button"
-                            title="Поиск по экрану" on:click={move |_| search_open.set(true)}>
-                            <span class="cmd-label">"Search"</span>
-                            <span class="cmd-keys" aria-hidden="true">
-                                <kbd class=move || format!("cmd-key{}", if held_mod.get() { " on" } else { "" })>{mod_label}</kbd>
-                                <kbd class=move || format!("cmd-key{}", if held_k.get() { " on" } else { "" })>"K"</kbd>
-                            </span>
-                        </button>
-                    </Show>
-                    <Show when={move || search_open.get()}>
-                        <div class="cmd-field">
-                            <svg class="cmd-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                                <circle cx="11" cy="11" r="7"></circle>
-                                <path d="m20 20-3.5-3.5"></path>
-                            </svg>
-                            <input data-bh="topbar.search_input" id="hop-screen-search" class="cmd-input" type="text" placeholder="Search"
-                                value=move || search_q.get()
-                                on:input=move |ev| {
-                                    let v = input_value(ev);
-                                    search_q.set(v.clone());
-                                    search_hits.set(hop_search(&v));
-                                }
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if ev.key() == "Escape" {
-                                        close_search();
-                                    }
-                                }
-                                on:blur=move |_| {
-                                    if search_q.get_untracked().is_empty() {
-                                        close_search();
-                                    }
-                                }
-                            />
-                            <span class="cmd-count">{move || {
-                                let q = search_q.get();
-                                let n = search_hits.get();
-                                if q.is_empty() {
-                                    String::new()
-                                } else if n == 0 {
-                                    "нет совпадений".to_string()
-                                } else {
-                                    format!("совпадений: {n}")
-                                }
-                            }}</span>
-                            <kbd class="cmd-key">"Esc"</kbd>
-                        </div>
-                    </Show>
-                </div>
-            </header>
-            <Show when={move || !groups.get().is_empty()}>
-                <div class="group-bar">
-                    {move || {
-                        groups
-                            .get()
-                            .into_iter()
-                            .map(|g| {
-                                let id = g.id.clone();
-                                let name = g.name.clone();
-                                view! {
-                                    <button data-bh=format!("group.dot.{id}") class="group-dot" title=name
-                                        on:click={let id = id.clone(); move |_| restore_group.run(id.clone())}>
-                                        {g.num.to_string()}
-                                    </button>
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    }}
-                </div>
-            </Show>
-            <div class="toolbar-row">
-                <div class="zoom-controls" title="Масштаб интерфейса">
-                    <button data-bh="topbar.zoom_out" class="zoom-btn" disabled=move || scale_idx.get() == SCALES.len() - 1
-                        title="Уменьшить шрифт (экономия места)" on:click=move |_| zoom_by(1)>"A−"</button>
-                    <span class="zoom-label">{move || format!("{}%", (SCALES[scale_idx.get()] * 100.0).round() as i64)}</span>
-                    <button data-bh="topbar.zoom_in" class="zoom-btn" disabled=move || scale_idx.get() == 0
-                        title="Увеличить шрифт" on:click=move |_| zoom_by(-1)>"A+"</button>
-                </div>
-                <div class="urlbar">
-                    <MethodSelect
-                        get_method=Callback::new(move |_| method.get())
-                        set_method=Callback::new(move |v: String| method.set(v.clone()))
-                    />
-                    <input data-bh="request.url"
-                        class="url-input"
-                        placeholder=move || if url.get().is_empty() { ph_hint.get() } else { String::new() }
-                        spellcheck="false"
-                        value=move || url.get()
-                        on:input=move |ev| on_url_change.run(input_value(ev))
-                        on:keydown=move |ev: web_sys::KeyboardEvent| {
-                            if ev.key() == "Enter" && can_send.get() {
-                                send.run(());
-                            }
+            <div class="app" style=move || format!("--ui-scale: {}", SCALES[scale_idx.get()])>
+                <header class="topbar">
+                    <div class="brand">
+                        <img class="brand-icon" src="/brand.png" alt="" />
+                        <span class="brand-name">"Bunny\u{a0}Hops"</span>
+                    </div>
+                    <button data-bh="topbar.mock_toggle" class="tab-add"
+                        title="Mock-сервер (BunnyProx)"
+                        style=move || if mock_mode.get() {
+                            "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
+                        } else {
+                            "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
                         }
-                    />
-                    <Show when={move || loading.get() || running.get()} fallback={move || view! {
-                        <button data-bh="request.send" class="send-btn" disabled={move || !can_send.get()}
-                            on:click=move |_| send.run(())>"Send"</button>
-                    }}>
-                        <button data-bh="request.stop" class="send-btn stop" title="Остановить" on:click=move |_| stop.run(())>"■ Stop"</button>
-                    </Show>
-                </div>
-            </div>
-
-            <Show when={move || url_preview_m.get().is_some()}>
-                <div class="vars-preview-line" title="Предпросмотр подстановки переменных">
-                    <span class="vars-arrow">"→"</span>
-                    {move || {
-                        let parts = url_preview_m.get()?;
-                        Some(
-                            parts
-                                .into_iter()
-                                .map(|ps| {
-                                    let cls = if ps.ok { "vp-ok" } else { "vp-unknown" };
-                                    let txt = ps.text;
-                                    view! { <span class=cls>{txt}</span> }
-                                })
-                                .collect::<Vec<_>>(),
-                        )
-                    }}
-                    <Show when={move || loading.get()}><span class="spinner tiny"/></Show>
-                </div>
-            </Show>
-
-            <Show when={move || error.get().is_some()}>
-                <div class="error-banner">"⚠️ "{move || error.get().unwrap_or_default()}</div>
-            </Show>
-
-            <Show when={move || !mock_mode.get()}
-                  fallback=move || view! { <main class="panes panes-mock"><ProxyView/></main> }>
-            <main class="panes">
-                <section class="pane">
-                    <nav class="tabs">
-                        <div class="tab-track" id="req-tabs" node_ref=req_track>
-                        <span class="tab-pill"/>
-                        <button data-bh="request.tab_params" class=move || if tab.get() == "params" { "tab active" } else { "tab" }
-                            on:click=move |_| tab.set("params".to_string())>
-                            "URL Params"
-                            <Show when={move || enabled_params.get() != 0}>
-                                <span class="tab-count">{move || enabled_params.get()}</span>
-                            </Show>
-                        </button>
-                        <button data-bh="request.tab_headers" class=move || if tab.get() == "headers" { "tab active" } else { "tab" }
-                            on:click=move |_| tab.set("headers".to_string())>
-                            "Headers"
-                            <Show when={move || enabled_headers.get() != 0}>
-                                <span class="tab-count">{move || enabled_headers.get()}</span>
-                            </Show>
-                        </button>
-                        <Show when={move || has_body.get()}>
-                            <button data-bh="request.tab_body" class=move || if tab.get() == "body" { "tab active" } else { "tab" }
-                                on:click=move |_| tab.set("body".to_string())>
-                                "Body"
-                                <Show when={move || !body.get().trim().is_empty()}>
-                                    <span class="tab-dot"/>
-                                </Show>
-                            </button>
+                        on:click=move |_| toggle_mock()>{ "Mock" }</button>
+                    <button data-bh="topbar.mcp_toggle" class="tab-add"
+                        title="MCP-гейт: API для тестовых инструментов (/api/debug-mode, /debug/*)"
+                        style=move || if debug_on.get() {
+                            "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
+                        } else {
+                            "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
+                        }
+                        on:click=move |_| toggle_debug()>{ "MCP" }</button>
+                    <button data-bh="topbar.tab_save" class={move || if invite_save.get() {
+                            "tab-add invite".to_string()
+                        } else {
+                            "tab-add".to_string()
+                        }}
+                        title="Сохранить текущий запрос как вкладку"
+                        on:click=move |_| open_modal.run(())>
+                        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                            <path d="M11 4v14M4 11h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+                        </svg>
+                    </button>
+                    <div class="tab-cloud">
+                        <Show when={move || !api_calls.get().is_empty()}>
+                            <span class="tab-chip tech">
+                                <button data-bh="topbar.api_cloud" class="tab-chip-open"
+                                    on:click={move |_| {
+                                        api_panel.update(|v| *v = !*v);
+                                        refresh_api.run(());
+                                    }}>
+                                    <span class="tab-chip-name">"automation_rules"</span>
+                                </button>
+                                <span class="api-count">{move || api_calls.get().len()}</span>
+                            </span>
                         </Show>
-                        <button data-bh="request.tab_steps" class=move || if tab.get() == "steps" { "tab active" } else { "tab" }
-                            on:click=move |_| tab.set("steps".to_string())>
-                            "Scenario"
-                            <Show when={move || !steps.get().is_empty()}>
-                                <span class="tab-count">{move || steps.get().len()}</span>
-                            </Show>
-                        </button>
-                        <button data-bh="request.tab_vars" class=move || if tab.get() == "vars" { "tab active" } else { "tab" }
-                            on:click=move |_| tab.set("vars".to_string())>
-                            "Vars"
-                            <Show when={move || !vars_map.get().is_empty()}>
-                                <span class="tab-count">{move || vars_map.get().len()}</span>
-                            </Show>
-                            </button>
-                            </div>
-                            </nav>
-
-                    <div class="pane-body">
-                        <Show when={move || tab.get() == "params"}>
-                            <KvEditor
-                                get_rows=Callback::new(move |_: ()| params.get())
-                                set_rows=Callback::new(move |rs: Vec<KvRow>| on_params_change.run(rs))
-                                key_placeholder="Parameter"
-                                value_placeholder="Value"
-                                example_key="token"
-                                example_value="2f9c8e4d"
-                                preview_label="URL с этим параметром:"
-                                preview=Callback::new(move |_: ()| {
-                                    let base = url.get();
-                                    let base = if base.trim().is_empty() {
-                                        "https://example.com/api/data".to_string()
-                                    } else {
-                                        base
-                                    };
-                                    let sep = if base.contains('?') { '&' } else { '?' };
-                                    format!("{base}{sep}token=2f9c8e4d")
-                                })
-                                empty_hint="Клик по строке — добавить"
-                            />
-                        </Show>
-                        <Show when={move || tab.get() == "headers"}>
-                            <KvEditor
-                                get_rows=Callback::new(move |_: ()| headers.get())
-                                set_rows=Callback::new(move |rs: Vec<KvRow>| headers.set(rs))
-                                key_placeholder="Header"
-                                value_placeholder="Value"
-                                example_key="Authorization"
-                                example_value="Bearer 2f9c8e4d"
-                                preview_label="В запрос уйдёт:"
-                                preview=Callback::new(move |_: ()| "Authorization: Bearer 2f9c8e4d".to_string())
-                                empty_hint="Клик по строке — добавить"
-                            />
-                        </Show>
-                        <Show when={move || tab.get() == "body" && has_body.get()}>
-                            <div class="body-editor">
-                                <div class="copy-row">
-                                    <div class="body-hint">{move || {
-                                        let b = body.get();
-                                        if pretty_json(&b).is_some() {
-                                            "✓ JSON valid".to_string()
-                                        } else if !b.trim().is_empty() {
-                                            "— не JSON".to_string()
-                                        } else {
-                                            String::new()
+                        <For
+                            each={move || saved.get().into_iter().collect::<Vec<_>>()}
+                            key={|r| r.id.clone()}
+                            children={move |r| {
+                                let id = r.id.clone();
+                                // живые данные чипа читаем из saved — автосохранение обновляет их на месте
+                                let cur = {
+                                    let id = id.clone();
+                                    std::sync::Arc::new(move || {
+                                        saved
+                                            .get()
+                                            .into_iter()
+                                            .find(|x| x.id == id)
+                                            .unwrap_or_else(|| r.clone())
+                                    })
+                                };
+                                let cur_cls = std::sync::Arc::clone(&cur);
+                                let cur_title = std::sync::Arc::clone(&cur);
+                                let cur_name = std::sync::Arc::clone(&cur);
+                                let id_cls = id.clone();
+                                view! {
+                                    <span class={move || {
+                                        let r = cur_cls();
+                                        let mut c = format!("tab-chip m-{}", r.method);
+                                        if active_tab.get().as_deref() == Some(id_cls.as_str()) {
+                                            c.push_str(" active");
                                         }
-                                    }}</div>
-                                    <Show when={move || !body.get().trim().is_empty()}>
-                                        <CopyButton
-                                            title="Копировать форматированный JSON запроса"
-                                            ok=copied_req.read_only()
-                                            on_copied=mark_copied(copied_req)
-                                            get_text=Callback::new(move |_: ()| {
-                                                let b = body.get_untracked();
-                                                pretty_json(&b).unwrap_or(b)
-                                            })
-                                        />
-                                    </Show>
-                                </div>
-                                <textarea data-bh="request.body"
-                                    class="body-textarea"
-                                    placeholder="{\"hello\": \"world\"}"
-                                    spellcheck="false"
-                                    bind:value=body
-                                />
-                            </div>
+                                        if let Some((fid, t)) = flash.get() {
+                                            if fid == id_cls {
+                                                c.push_str(&format!(" flash{}", t % 2));
+                                            }
+                                        }
+                                        c
+                                    }} title={move || cur_title().url}>
+                                        <button data-bh=format!("tab.chip.{id}") class="tab-chip-open"
+                                            on:click={let id = id.clone(); move |_| load_saved_req.run(id.clone())}>
+                                            <span class="tab-chip-name">{move || cur_name().name}</span>
+                                        </button>
+                                        <button data-bh=format!("tab.delete.{id}") class="tab-chip-del" title="Удалить"
+                                            on:click={let id = id.clone(); move |_| del_confirm.set(Some(id.clone()))}>"✕"</button>
+                                    </span>
+                                }
+                            }}
+                        />
+                    </div>
+
+                    <div class=move || format!("cmd-search {}", if search_open.get() { "cmd-open" } else if mac { "cmd-mac" } else { "cmd-pc" })>
+                        <Show when={move || !search_open.get()}>
+                            <button data-bh="topbar.search_open" class="cmd-pill" type="button"
+                                title="Поиск по экрану" on:click={move |_| search_open.set(true)}>
+                                <span class="cmd-label">"Search"</span>
+                                <span class="cmd-keys" aria-hidden="true">
+                                    <kbd class=move || format!("cmd-key{}", if held_mod.get() { " on" } else { "" })>{mod_label}</kbd>
+                                    <kbd class=move || format!("cmd-key{}", if held_k.get() { " on" } else { "" })>"K"</kbd>
+                                </span>
+                            </button>
                         </Show>
-                        <Show when={move || tab.get() == "steps"}>
-                            <div class="steps-panel">
-                                <div class="steps-actions">
-                                    <button data-bh="steps.run_all" class="btn-accent" disabled=move || running.get() || steps.get().is_empty()
-                                        title="Выполнить шаги последовательно" on:click=move |_| run_all.run(())>
-                                        "▶ Run all"
-                                    </button>
-                                    <button data-bh="steps.add_current" class="btn-ghost" disabled=move || running.get() || url.get().trim().is_empty()
-                                        title="Добавить настроенный сейчас запрос как шаг"
-                                        on:click=move |_| add_step_from_current.run(())>
-                                        "＋ Текущий запрос"
-                                    </button>
-                                    <button data-bh="steps.reset" class="btn-ghost" disabled=move || running.get() || steps.get().is_empty()
-                                        title="Сбросить статусы" on:click=move |_| reset_steps.run(())>"↺ Reset"</button>
-                                    <button data-bh="steps.clear" class="btn-ghost danger" disabled=move || running.get() || steps.get().is_empty()
-                                        title="Очистить список" on:click=move |_| clear_steps.run(())>"🗑"</button>
-                                </div>
-                                <Show when={move || steps.get().is_empty()}>
-                                    <div class="kv-empty">
-                                        "Сценарий пуст. Настройте запрос (метод, URL, заголовки, тело) и нажмите «＋ Текущий запрос»."
-                                    </div>
-                                </Show>
-                                <For
-                                    each={move || steps.get().into_iter().enumerate().collect::<Vec<_>>()}
-                                    key={|(_, s)| s.id.clone()}
-                                    children={move |(i, step)| {
-                                    view! {
-                                        <div class={move || format!("step-card st-{}", step_at(&steps, i, |s| s.status.clone()))} data-step={step.id.clone()}>
-                                            <div class="step-head" on:click=move |_| {
-                                                let cur = step_at_opt(&steps, i, |s| s.id.clone());
-                                                let o = open_step_id.get_untracked();
-                                                open_step_id.set(if o == cur { None } else { cur });
-                                            }>
-                                                <span class="step-num">{i + 1}</span>
-                                                <span class=move || format!("step-method m-{}", step_at(&steps, i, |s| s.method.clone()))>
-                                                    {move || step_at(&steps, i, |s| s.method.clone())}
-                                                </span>
-                                                <span class="step-url" title={move || step_at(&steps, i, |s| s.url.clone())}>
-                                                    {move || step_at(&steps, i, |s| s.url.clone())}
-                                                </span>
-                                                <Show when={move || !step_at(&steps, i, |s| s.capture_name.clone()).is_empty()}>
-                                                    <span class="step-capture" title={move || "подставляется как {{".to_string() + &step_at(&steps, i, |s| s.capture_name.clone()) + "}}"}>
-                                                        {move || step_at(&steps, i, |s| s.capture_name.clone())}
-                                                    </span>
-                                                </Show>
-                                                <span class="step-status">
-                                                    <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "running"}>
-                                                        <span class="spinner"/>
-                                                        <span class="streaming-badge mini">{format!("● шаг {}", i + 1)}</span>
-                                                    </Show>
-                                                    <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "ok"}>
-                                                        {move || step_at_opt(&steps, i, |s| s.result.clone()).flatten().map(result_chip)}
-                                                    </Show>
-                                                    <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "fail"}>
-                                                        {move || match step_at_opt(&steps, i, |s| s.result.clone()).flatten() {
-                                                            Some(r) => fail_chip(r),
-                                                            None => view! { <span class="status-chip s-5xx mini">"✗"</span> }.into_any(),
-                                                        }}
-                                                    </Show>
-                                                    <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "skipped"}>
-                                                        <span class="chips-skipped">"— пропуск"</span>
-                                                    </Show>
-                                                </span>
-                                            </div>
-                                            <Show when={move || open_step_id.get() == step_at_opt(&steps, i, |s| s.id.clone())}>
-                                                <div class="step-body">
-                                                    <div class="step-row">
-                                                        <MethodSelect
-                                                            get_method=Callback::new(move |_| step_at(&steps, i, |s| s.method.clone()))
-                                                            set_method=Callback::new(move |v: String| {
-                                                                update_step_at(&steps, i, |s| s.method = v);
-                                                            })
-                                                        />
-                                                        <input data-bh=format!("step.url.{i}") class="kv-input" spellcheck="false" placeholder="URL (можно {{var}})"
-                                                            value=move || step_at(&steps, i, |s| s.url.clone())
-                                                            on:input=move |ev| {
-                                                                let v = input_value(ev);
-                                                                update_step_at(&steps, i, |s| s.url = v);
-                                                            }/>
-                                                    </div>
-                                                    <div class="step-headers-label">"Заголовки шага"</div>
-                                                    <KvEditor
-                                                        get_rows=Callback::new(move |_: ()| steps.get_untracked().get(i).map(|s| s.headers.clone()).unwrap_or_default())
-                                                        set_rows=Callback::new(move |rs: Vec<KvRow>| {
-                                                            steps.update(|v| { if let Some(s) = v.get_mut(i) { s.headers = rs; } });
-                                                        })
-                                                        key_placeholder="Header"
-                                                        value_placeholder="Value"
-                                                        example_key="Authorization"
-                                                        example_value="Bearer 2f9c8e4d"
-                                                        preview_label="В запрос шага уйдёт:"
-                                                        preview=Callback::new(move |_: ()| "Authorization: Bearer 2f9c8e4d".to_string())
-                                                        empty_hint="Клик по строке — добавить"
-                                                    />
-                                                    <Show when={move || !is_bodyless(&step_at(&steps, i, |s| s.method.clone()))}>
-                                                        <textarea data-bh=format!("step.body.{i}") class="body-textarea step-body-textarea"
-                                                            placeholder="{\"hello\": \"{{name}}\"}" spellcheck="false"
-                                                            on:input=move |ev| {
-                                                                let v = input_value(ev);
-                                                                update_step_at(&steps, i, |s| s.body = v);
-                                                            }>{step_at_opt(&steps, i, |s| s.body.clone()).unwrap_or_default()}</textarea>
-                                                    </Show>
-                                                    <div class="step-row capture-row">
-                                                        <label>"Захват переменной:"</label>
-                                                        <input data-bh=format!("step.capture_name.{i}") class="kv-input" style="max-width:120px" placeholder="имя"
-                                                            spellcheck="false"
-                                                            value=move || step_at(&steps, i, |s| s.capture_name.clone())
-                                                            on:input=move |ev| {
-                                                                let v: String = input_value(ev).chars()
-                                                                    .filter(|c| c.is_alphanumeric() || *c == '_')
-                                                                    .collect();
-                                                                update_step_at(&steps, i, |s| s.capture_name = v);
-                                                            }/>
-                                                        <input data-bh=format!("step.capture_path.{i}") class="kv-input" placeholder="$.data.token"
-                                                            spellcheck="false"
-                                                            value=move || step_at(&steps, i, |s| s.capture_path.clone())
-                                                            on:input=move |ev| {
-                                                                let v = input_value(ev);
-                                                                update_step_at(&steps, i, |s| s.capture_path = v);
-                                                            }/>
-                                                        <button data-bh=format!("step.delete.{i}") class="kv-remove" title="Удалить шаг"
-                                                            on:click=move |_| {
-                                                                if let Some(sid) = step_at_opt(&steps, i, |s| s.id.clone()) {
-                                                                    remove_step.run(sid);
-                                                                }
-                                                            }>"×"</button>
-                                                    </div>
-                                                </div>
-                                            </Show>
-                                        </div>
+                        <Show when={move || search_open.get()}>
+                            <div class="cmd-field">
+                                <svg class="cmd-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                                    <circle cx="11" cy="11" r="7"></circle>
+                                    <path d="m20 20-3.5-3.5"></path>
+                                </svg>
+                                <input data-bh="topbar.search_input" id="hop-screen-search" class="cmd-input" type="text" placeholder="Search"
+                                    value=move || search_q.get()
+                                    on:input=move |ev| {
+                                        let v = input_value(ev);
+                                        search_q.set(v.clone());
+                                        search_hits.set(hop_search(&v));
                                     }
-                                    }}
+                                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                        if ev.key() == "Escape" {
+                                            close_search();
+                                        }
+                                    }
+                                    on:blur=move |_| {
+                                        if search_q.get_untracked().is_empty() {
+                                            close_search();
+                                        }
+                                    }
                                 />
-                                <Show when={move || running.get()}>
-                                    <div class="steps-hint">"▶ Выполняем по шагам… правая панель показывает ответ текущего шага."</div>
-                                </Show>
-                            </div>
-                        </Show>
-                        <Show when={move || tab.get() == "vars"}>
-                            <div>
-                                <KvEditor
-                                    get_rows=Callback::new(move |_: ()| vars.get())
-                                    set_rows=Callback::new(move |rs: Vec<KvRow>| vars.set(rs))
-                                    key_placeholder="baseUrl"
-                                    value_placeholder="https://api.example.com"
-                                    example_key="baseUrl"
-                                    example_value="https://api.example.com"
-                                    preview=Callback::new(move |_: ()| "{{baseUrl}}/v1/users  →  https://api.example.com/v1/users".to_string())
-                                    empty_hint="Использовать в URL, заголовках и теле запроса"
-                                />
+                                <span class="cmd-count">{move || {
+                                    let q = search_q.get();
+                                    let n = search_hits.get();
+                                    if q.is_empty() {
+                                        String::new()
+                                    } else if n == 0 {
+                                        "нет совпадений".to_string()
+                                    } else {
+                                        format!("совпадений: {n}")
+                                    }
+                                }}</span>
+                                <kbd class="cmd-key">"Esc"</kbd>
                             </div>
                         </Show>
                     </div>
-                </section>
-
-                <section class="pane">
-                    <Show when={move || response.get().is_some()} fallback={move || view! {
-                        <div class="empty-state">
-                            <Show when={move || loading.get() || running.get()} fallback={move || view! {
-                                <p>"Отправьте запрос, чтобы увидеть ответ"</p>
-                                <p class="empty-sub">
-                                    "Enter для отправки. Ответ появляется в реальном времени, пока API ещё отвечает. \
-                                     Сценарий (Steps) позволяет пройти цепочку запросов пошагово. CORS не мешает — \
-                                     запросы идут через локальный прокси."
-                                </p>
-                            }}>
-                                <span class="spinner big"/>
-                                <p>{move || if running.get() { "Выполняется сценарий…" } else { "Ожидаем заголовки ответа…" }}</p>
-                            </Show>
-                        </div>
-                    }}>
-                        <div class="response-meta">
-                            {move || {
-                                let r = response.get()?;
-                                Some(view! {
-                                    <span class=format!("status-chip s-{}xx", r.status / 100)>
-                                        {format!("{} {}", r.status, r.status_text)}
-                                    </span>
-                                })
-                            }}
-                            <Show when={move || response.get().map(|r| r.streaming).unwrap_or(false)}>
-                                <span class="streaming-badge">"● поток"</span>
-                            </Show>
-                            <Show when={move || response.get().map(|r| r.cancelled).unwrap_or(false)}>
-                                <span class="cancelled-badge">"⏹ остановлено"</span>
-                            </Show>
-                            {move || {
-                                let r = response.get()?;
-                                Some(view! {
-                                    <span class="meta-item">{format!("{:.0} ms", r.time_ms)}</span>
-                                    <span class="meta-item">{format_size(Some(r.bytes))}</span>
-                                })
-                            }}
-                            <Show when={move || {
-                                let r = response.get();
-                                match r.as_ref() {
-                                    Some(resp) => !resp.final_url.is_empty() && resp.final_url != url.get(),
-                                    None => false,
-                                }
-                            }}>
-                                <span class="meta-item redirect" title="После редиректов">
-                                    {move || format!("→ {}", response.get().map(|r| r.final_url).unwrap_or_default())}
-                                </span>
-                            </Show>
-                            <Show when={move || {
-                                let r = response.get();
-                                match r.as_ref() {
-                                    Some(resp) => resp.is_textual && !resp.streaming && !resp.body_text.is_empty(),
-                                    None => false,
-                                }
-                            }}>
-                                <CopyButton
-                                    title="Копировать форматированный JSON ответа"
-                                    ok=copied_resp.read_only()
-                                    on_copied=mark_copied(copied_resp)
-                                    get_text=Callback::new(move |_: ()| {
-                                        if let Some(resp) = response.get_untracked() {
-                                            pretty_json(&resp.body_text).unwrap_or(resp.body_text)
-                                        } else {
-                                            String::new()
-                                        }
-                                    })
-                                />
-                            </Show>
-                            <Show when={move || {
-                                let r = response.get();
-                                match r.as_ref() {
-                                    Some(resp) => resp.is_textual && !resp.streaming,
-                                    None => false,
-                                }
-                            }}>
-                                <div class="body-view-toggle">
-                                    <button data-bh="response.view_pretty" class=move || if pretty.get() { "view-btn active" } else { "view-btn" }
-                                        on:click=move |_| pretty.set(true)>"Pretty"</button>
-                                    <button data-bh="response.view_raw" class=move || if !pretty.get() { "view-btn active" } else { "view-btn" }
-                                        on:click=move |_| pretty.set(false)>"Raw"</button>
-                                </div>
-                            </Show>
-                        </div>
-                        <nav class="tabs">
-                            <div class="tab-track" id="resp-tabs" node_ref=resp_track>
-                            <span class="tab-pill"/>
-                            <button data-bh="response.tab_body" class=move || if resp_tab.get() == "body" { "tab active" } else { "tab" }
-                                on:click=move |_| resp_tab.set("body".to_string())>"Response body"</button>
-                            <button data-bh="response.tab_headers" class=move || if resp_tab.get() == "headers" { "tab active" } else { "tab" }
-                                on:click=move |_| resp_tab.set("headers".to_string())>"Response headers"</button>
-                            </div>
-                        </nav>
-                        <Show when={move || {
-                            let r = response.get();
-                            r.as_ref().map(|resp| resp.is_textual).unwrap_or(false) && resp_tab.get() == "body"
-                        }}>
-                            <div class="search-bar">
-                                <span class="search-icon">"🔍"</span>
-                                <input data-bh="response.search_input" id="hop-search-input" class="search-input" spellcheck="false"
-                                    placeholder="Search"
-                                    value=move || query.get()
-                                    on:input=move |ev| query.set(input_value(ev))
-                                    on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                        if ev.key() == "Enter" {
-                                            ev.prevent_default();
-                                            goto_match(if ev.shift_key() { -1 } else { 1 });
-                                        }
-                                    }/>
-                                <span class=move || if match_count.get() != 0 { "search-count" } else { "search-count none" }>
-                                    {move || {
-                                        let q = query.get();
-                                        let mc = match_count.get();
-                                        if q.is_empty() {
-                                            String::new()
-                                        } else if mc == 0 {
-                                            "нет совпадений".to_string()
-                                        } else {
-                                            format!("{} / {}", cur_match.get() + 1, mc)
-                                        }
-                                    }}
-                                </span>
-                                <button data-bh="response.search_prev" class="search-nav" disabled=move || match_count.get() == 0
-                                    title="Предыдущее (Shift+Enter)" on:click=move |_| goto_match(-1)>"↑"</button>
-                                <button data-bh="response.search_next" class="search-nav" disabled=move || match_count.get() == 0
-                                    title="Следующее (Enter)" on:click=move |_| goto_match(1)>"↓"</button>
-                                <button data-bh="response.search_clear" class="search-nav" title="Очистить" on:click=move |_| query.set(String::new())>"✕"</button>
-                            </div>
-                        </Show>
-                        <div class="pane-body">
-                            <Show when={move || resp_tab.get() == "body"}>
-                                {move || {
-                                    let r = response.get()?;
-                                    if let Some(src) = r.image_blob_url.as_ref() {
-                                        return Some(view! {
-                                            <img class="response-image" src={src.clone()} alt="response"/>
-                                        }.into_any());
-                                    }
-                                    if r.is_textual {
-                                        let lines = search.get().map(|s| s.lines.clone()).unwrap_or_default();
-                                        return Some(view! {
-                                            <div class="response-lines">
-                                                <For
-                                                    each={move || lines.clone().into_iter().enumerate().collect::<Vec<_>>()}
-                                                    key=|(li, _)| *li
-                                                    children=move |(_, line)| {
-                                                        view! {
-                                                            <div class={move || {
-                                                                let mut cls = String::from("code-line");
-                                                                if line.hit { cls.push_str(" line-match"); }
-                                                                if line.has_error { cls.push_str(" line-error"); }
-                                                                if line.segs.iter().any(|s| s.mi == Some(cur_match.get())) {
-                                                                    cls.push_str(" line-current");
-                                                                }
-                                                                cls
-                                                            }}>
-                                                                {line.segs.clone().into_iter().enumerate().map(|(_si, seg)| match seg.mi {
-                                                                    Some(mi) => view! {
-                                                                        <mark data-mi={mi}
-                                                                            class={move || if cur_match.get() == mi { "match current" } else { "match" }}>
-                                                                            {seg.text.clone()}
-                                                                        </mark>
-                                                                    }.into_any(),
-                                                                    None if seg.err => view! {
-                                                                        <span class="err-phrase">{seg.text.clone()}</span>
-                                                                    }.into_any(),
-                                                                    None => view! { <span>{seg.text.clone()}</span> }.into_any(),
-                                                                }).collect::<Vec<_>>()}
-                                                            </div>
-                                                        }
-                                                    }
-                                                />
-                                            </div>
-                                        }.into_any());
-                                    }
-                                    Some(view! {
-                                        <div class="binary-note">{move || {
-                                            let r = response.get()?;
-                                            Some(if r.streaming {
-                                                format!("⏬ Получаем бинарные данные… {}", format_size(Some(r.bytes)))
-                                            } else {
-                                                let ct = if r.content_type.is_empty() { "unknown".to_string() } else { r.content_type.clone() };
-                                                format!("Двоичные данные ({}), {}", ct, format_size(Some(r.bytes)))
-                                            })
-                                        }}</div>
-                                    }.into_any())
-                                }}
-                            </Show>
-                            <Show when={move || resp_tab.get() == "headers"}>
-                                <table class="headers-table">
-                                    <tbody>
-                                        {move || {
-                                            let r = response.get()?;
-                                            Some(r.headers.iter().map(|(k, v)| view! {
-                                                <tr>
-                                                    <td class="header-name">{k.clone()}</td>
-                                                    <td class="header-value">{v.clone()}</td>
-                                                </tr>
-                                            }).collect::<Vec<_>>())
-                                        }}
-                                    </tbody>
-                                </table>
-                            </Show>
-                        </div>
-                    </Show>
-                </section>
-            </main>
-            </Show>
-            <Show when={move || api_panel.get()}>
-                <div class="modal-overlay"
-                    on:click=move |ev| {
-                        let on_overlay = ev
-                            .target()
-                            .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
-                            .map(|t| t.class_list().contains("modal-overlay"))
-                            .unwrap_or(false);
-                        if on_overlay {
-                            api_panel.set(false);
-                        }
-                    }>
-                    <div class="modal api-modal">
-                        <div class="api-panel-head">
-                            <span>"запросы, присланные в API"</span>
-                            <span class="api-head-btns">
-                                <button data-bh="api_log.refresh" class="api-refresh" title="Обновить"
-                                    on:click={move |_| refresh_api.run(())}>"↻"</button>
-                                <button data-bh="api_log.close" class="api-refresh" title="Закрыть (Esc)"
-                                    on:click={move |_| api_panel.set(false)}>"✕"</button>
-                            </span>
-                        </div>
-                        <div class="api-list">
-{move || {
-                            api_calls
+                </header>
+                <Show when={move || !groups.get().is_empty()}>
+                    <div class="group-bar">
+                        {move || {
+                            groups
                                 .get()
                                 .into_iter()
-                                .rev()
-                                .map(|c| {
-                                    let c2 = c.clone();
-                                    let mcls = format!("api-m m-{}", c.method);
-                                    let m = c.method.clone();
-                                    let u = c.url.clone();
-                                    let st = c.status.to_string();
-                                    let t = fmt_ts(c.ts);
+                                .map(|g| {
+                                    let id = g.id.clone();
+                                    let name = g.name.clone();
                                     view! {
-                                        <div class="api-item"
-                                            on:click={move |_| load_api_call.run(c2.clone())}>
-                                            <span class=mcls>{m}</span>
-                                            <span class="api-u">{u}</span>
-                                            <span class="api-s">{st}</span>
-                                            <span class="api-t">{t}</span>
-                                        </div>
+                                        <button data-bh=format!("group.dot.{id}") class="group-dot" title=name
+                                            on:click={let id = id.clone(); move |_| restore_group.run(id.clone())}>
+                                            {g.num.to_string()}
+                                        </button>
                                     }
                                 })
                                 .collect::<Vec<_>>()
                         }}
-                        </div>
                     </div>
-                </div>
-            </Show>
-            <Show when={move || modal_open.get()}>
-                <div class="modal-overlay"
-                    on:click=move |ev| {
-                        let on_overlay = ev
-                            .target()
-                            .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
-                            .map(|t| t.class_list().contains("modal-overlay"))
-                            .unwrap_or(false);
-                        if on_overlay {
-                            modal_open.set(false);
-                        }
-                    }>
-                    <div class="modal">
-                        <div class="modal-title">"Новая вкладка"</div>
-                        <input data-bh="modal.tab_name" class="modal-input" type="text" placeholder="Название вкладки"
-                            autofocus=true
-                            value=move || modal_name.get()
-                            on:input=move |ev| {
-                                modal_name.set(input_value(ev));
-                                modal_err.set(String::new());
+                </Show>
+                <div class="toolbar-row">
+                    <div class="zoom-controls" title="Масштаб интерфейса">
+                        <button data-bh="topbar.zoom_out" class="zoom-btn" disabled=move || scale_idx.get() == SCALES.len() - 1
+                            title="Уменьшить шрифт (экономия места)" on:click=move |_| zoom_by(1)>"A−"</button>
+                        <span class="zoom-label">{move || format!("{}%", (SCALES[scale_idx.get()] * 100.0).round() as i64)}</span>
+                        <button data-bh="topbar.zoom_in" class="zoom-btn" disabled=move || scale_idx.get() == 0
+                            title="Увеличить шрифт" on:click=move |_| zoom_by(-1)>"A+"</button>
+                    </div>
+                    <div class="urlbar">
+                        <MethodSelect
+                            get_method=Callback::new(move |_| method.get())
+                            set_method=Callback::new(move |v: String| method.set(v.clone()))
+                        />
+                        <input data-bh="request.url"
+                            class="url-input"
+                            placeholder=move || if url.get().is_empty() { ph_hint.get() } else { String::new() }
+                            spellcheck="false"
+                            value=move || url.get()
+                            on:input=move |ev| on_url_change.run(input_value(ev))
+                            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                if ev.key() == "Enter" && can_send.get() {
+                                    send.run(());
+                                }
                             }
-                            on:keydown=move |ev| {
-                                if ev.key() == "Enter" {
-                                    save_current.run(());
-                                } else if ev.key() == "Escape" {
-                                    modal_open.set(false);
-                                }
-                            } />
-                        <Show when={move || !modal_err.get().is_empty()}>
-                            <div class="modal-err">{move || modal_err.get()}</div>
+                        />
+                        <Show when={move || loading.get() || running.get()} fallback={move || view! {
+                            <button data-bh="request.send" class="send-btn" disabled={move || !can_send.get()}
+                                on:click=move |_| send.run(())>"Send"</button>
+                        }}>
+                            <button data-bh="request.stop" class="send-btn stop" title="Остановить" on:click=move |_| stop.run(())>"■ Stop"</button>
                         </Show>
-                        <div class="modal-actions">
-                            <button data-bh="modal.tab_save_confirm" class="modal-save" on:click=move |_| save_current.run(())>"Сохранить"</button>
-                            <button data-bh="modal.tab_save_cancel" class="modal-cancel" on:click=move |_| modal_open.set(false)>"Отмена"</button>
-                        </div>
                     </div>
                 </div>
-            </Show>
-            <Show when={move || del_confirm.get().is_some()}>
-                <div class="modal-overlay"
-                    on:click=move |ev| {
-                        let on_overlay = ev
-                            .target()
-                            .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
-                            .map(|t| t.class_list().contains("modal-overlay"))
-                            .unwrap_or(false);
-                        if on_overlay {
-                            del_confirm.set(None);
-                        }
-                    }>
-                    <div class="modal">
-                        <div class="modal-title">"Удалить вкладку?"</div>
-                        <div class="modal-actions">
-                            <button data-bh="modal.tab_del_confirm" class="modal-save danger" on:click=move |_| {
-                                if let Some(id) = del_confirm.get_untracked() {
-                                    delete_saved.run(id);
+
+                <Show when={move || url_preview_m.get().is_some()}>
+                    <div class="vars-preview-line" title="Предпросмотр подстановки переменных">
+                        <span class="vars-arrow">"→"</span>
+                        {move || {
+                            let parts = url_preview_m.get()?;
+                            Some(
+                                parts
+                                    .into_iter()
+                                    .map(|ps| {
+                                        let cls = if ps.ok { "vp-ok" } else { "vp-unknown" };
+                                        let txt = ps.text;
+                                        view! { <span class=cls>{txt}</span> }
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        }}
+                        <Show when={move || loading.get()}><span class="spinner tiny"/></Show>
+                    </div>
+                </Show>
+
+                <Show when={move || error.get().is_some()}>
+                    <div class="error-banner">"⚠️ "{move || error.get().unwrap_or_default()}</div>
+                </Show>
+
+                <Show when={move || !mock_mode.get()}
+                      fallback=move || view! { <main class="panes panes-mock"><ProxyView/></main> }>
+                <main class="panes">
+                    <section class="pane">
+                        <nav class="tabs">
+                            <div class="tab-track" id="req-tabs" node_ref=req_track>
+                            <span class="tab-pill"/>
+                            <button data-bh="request.tab_params" class=move || if tab.get() == "params" { "tab active" } else { "tab" }
+                                on:click=move |_| tab.set("params".to_string())>
+                                "URL Params"
+                                <Show when={move || enabled_params.get() != 0}>
+                                    <span class="tab-count">{move || enabled_params.get()}</span>
+                                </Show>
+                            </button>
+                            <button data-bh="request.tab_headers" class=move || if tab.get() == "headers" { "tab active" } else { "tab" }
+                                on:click=move |_| tab.set("headers".to_string())>
+                                "Headers"
+                                <Show when={move || enabled_headers.get() != 0}>
+                                    <span class="tab-count">{move || enabled_headers.get()}</span>
+                                </Show>
+                            </button>
+                            <Show when={move || has_body.get()}>
+                                <button data-bh="request.tab_body" class=move || if tab.get() == "body" { "tab active" } else { "tab" }
+                                    on:click=move |_| tab.set("body".to_string())>
+                                    "Body"
+                                    <Show when={move || !body.get().trim().is_empty()}>
+                                        <span class="tab-dot"/>
+                                    </Show>
+                                </button>
+                            </Show>
+                            <button data-bh="request.tab_steps" class=move || if tab.get() == "steps" { "tab active" } else { "tab" }
+                                on:click=move |_| tab.set("steps".to_string())>
+                                "Scenario"
+                                <Show when={move || !steps.get().is_empty()}>
+                                    <span class="tab-count">{move || steps.get().len()}</span>
+                                </Show>
+                            </button>
+                            <button data-bh="request.tab_vars" class=move || if tab.get() == "vars" { "tab active" } else { "tab" }
+                                on:click=move |_| tab.set("vars".to_string())>
+                                "Vars"
+                                <Show when={move || !vars_map.get().is_empty()}>
+                                    <span class="tab-count">{move || vars_map.get().len()}</span>
+                                </Show>
+                                </button>
+                                </div>
+                                </nav>
+
+                        <div class="pane-body">
+                            <Show when={move || tab.get() == "params"}>
+                                <KvEditor
+                                    get_rows=Callback::new(move |_: ()| params.get())
+                                    set_rows=Callback::new(move |rs: Vec<KvRow>| on_params_change.run(rs))
+                                    key_placeholder="Parameter"
+                                    value_placeholder="Value"
+                                    example_key="token"
+                                    example_value="2f9c8e4d"
+                                    preview_label="URL с этим параметром:"
+                                    preview=Callback::new(move |_: ()| {
+                                        let base = url.get();
+                                        let base = if base.trim().is_empty() {
+                                            "https://example.com/api/data".to_string()
+                                        } else {
+                                            base
+                                        };
+                                        let sep = if base.contains('?') { '&' } else { '?' };
+                                        format!("{base}{sep}token=2f9c8e4d")
+                                    })
+                                    empty_hint="Клик по строке — добавить"
+                                />
+                            </Show>
+                            <Show when={move || tab.get() == "headers"}>
+                                <KvEditor
+                                    get_rows=Callback::new(move |_: ()| headers.get())
+                                    set_rows=Callback::new(move |rs: Vec<KvRow>| headers.set(rs))
+                                    key_placeholder="Header"
+                                    value_placeholder="Value"
+                                    example_key="Authorization"
+                                    example_value="Bearer 2f9c8e4d"
+                                    preview_label="В запрос уйдёт:"
+                                    preview=Callback::new(move |_: ()| "Authorization: Bearer 2f9c8e4d".to_string())
+                                    empty_hint="Клик по строке — добавить"
+                                />
+                            </Show>
+                            <Show when={move || tab.get() == "body" && has_body.get()}>
+                                <div class="body-editor">
+                                    <div class="copy-row">
+                                        <div class="body-hint">{move || {
+                                            let b = body.get();
+                                            if pretty_json(&b).is_some() {
+                                                "✓ JSON valid".to_string()
+                                            } else if !b.trim().is_empty() {
+                                                "— не JSON".to_string()
+                                            } else {
+                                                String::new()
+                                            }
+                                        }}</div>
+                                        <Show when={move || !body.get().trim().is_empty()}>
+                                            <CopyButton
+                                                title="Копировать форматированный JSON запроса"
+                                                ok=copied_req.read_only()
+                                                on_copied=mark_copied(copied_req)
+                                                get_text=Callback::new(move |_: ()| {
+                                                    let b = body.get_untracked();
+                                                    pretty_json(&b).unwrap_or(b)
+                                                })
+                                            />
+                                        </Show>
+                                    </div>
+                                    <textarea data-bh="request.body"
+                                        class="body-textarea"
+                                        placeholder="{\"hello\": \"world\"}"
+                                        spellcheck="false"
+                                        bind:value=body
+                                    />
+                                </div>
+                            </Show>
+                            <Show when={move || tab.get() == "steps"}>
+                                <div class="steps-panel">
+                                    <div class="steps-actions">
+                                        <button data-bh="steps.run_all" class="btn-accent" disabled=move || running.get() || steps.get().is_empty()
+                                            title="Выполнить шаги последовательно" on:click=move |_| run_all.run(())>
+                                            "▶ Run all"
+                                        </button>
+                                        <button data-bh="steps.add_current" class="btn-ghost" disabled=move || running.get() || url.get().trim().is_empty()
+                                            title="Добавить настроенный сейчас запрос как шаг"
+                                            on:click=move |_| add_step_from_current.run(())>
+                                            "＋ Текущий запрос"
+                                        </button>
+                                        <button data-bh="steps.reset" class="btn-ghost" disabled=move || running.get() || steps.get().is_empty()
+                                            title="Сбросить статусы" on:click=move |_| reset_steps.run(())>"↺ Reset"</button>
+                                        <button data-bh="steps.clear" class="btn-ghost danger" disabled=move || running.get() || steps.get().is_empty()
+                                            title="Очистить список" on:click=move |_| clear_steps.run(())>"🗑"</button>
+                                    </div>
+                                    <Show when={move || steps.get().is_empty()}>
+                                        <div class="kv-empty">
+                                            "Сценарий пуст. Настройте запрос (метод, URL, заголовки, тело) и нажмите «＋ Текущий запрос»."
+                                        </div>
+                                    </Show>
+                                    <For
+                                        each={move || steps.get().into_iter().enumerate().collect::<Vec<_>>()}
+                                        key={|(_, s)| s.id.clone()}
+                                        children={move |(i, step)| {
+                                        view! {
+                                            <div class={move || format!("step-card st-{}", step_at(&steps, i, |s| s.status.clone()))} data-step={step.id.clone()}>
+                                                <div class="step-head" on:click=move |_| {
+                                                    let cur = step_at_opt(&steps, i, |s| s.id.clone());
+                                                    let o = open_step_id.get_untracked();
+                                                    open_step_id.set(if o == cur { None } else { cur });
+                                                }>
+                                                    <span class="step-num">{i + 1}</span>
+                                                    <span class=move || format!("step-method m-{}", step_at(&steps, i, |s| s.method.clone()))>
+                                                        {move || step_at(&steps, i, |s| s.method.clone())}
+                                                    </span>
+                                                    <span class="step-url" title={move || step_at(&steps, i, |s| s.url.clone())}>
+                                                        {move || step_at(&steps, i, |s| s.url.clone())}
+                                                    </span>
+                                                    <Show when={move || !step_at(&steps, i, |s| s.capture_name.clone()).is_empty()}>
+                                                        <span class="step-capture" title={move || "подставляется как {{".to_string() + &step_at(&steps, i, |s| s.capture_name.clone()) + "}}"}>
+                                                            {move || step_at(&steps, i, |s| s.capture_name.clone())}
+                                                        </span>
+                                                    </Show>
+                                                    <span class="step-status">
+                                                        <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "running"}>
+                                                            <span class="spinner"/>
+                                                            <span class="streaming-badge mini">{format!("● шаг {}", i + 1)}</span>
+                                                        </Show>
+                                                        <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "ok"}>
+                                                            {move || step_at_opt(&steps, i, |s| s.result.clone()).flatten().map(result_chip)}
+                                                        </Show>
+                                                        <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "fail"}>
+                                                            {move || match step_at_opt(&steps, i, |s| s.result.clone()).flatten() {
+                                                                Some(r) => fail_chip(r),
+                                                                None => view! { <span class="status-chip s-5xx mini">"✗"</span> }.into_any(),
+                                                            }}
+                                                        </Show>
+                                                        <Show when={move || step_at(&steps, i, |s| s.status.clone()) == "skipped"}>
+                                                            <span class="chips-skipped">"— пропуск"</span>
+                                                        </Show>
+                                                    </span>
+                                                </div>
+                                                <Show when={move || open_step_id.get() == step_at_opt(&steps, i, |s| s.id.clone())}>
+                                                    <div class="step-body">
+                                                        <div class="step-row">
+                                                            <MethodSelect
+                                                                get_method=Callback::new(move |_| step_at(&steps, i, |s| s.method.clone()))
+                                                                set_method=Callback::new(move |v: String| {
+                                                                    update_step_at(&steps, i, |s| s.method = v);
+                                                                })
+                                                            />
+                                                            <input data-bh=format!("step.url.{i}") class="kv-input" spellcheck="false" placeholder="URL (можно {{var}})"
+                                                                value=move || step_at(&steps, i, |s| s.url.clone())
+                                                                on:input=move |ev| {
+                                                                    let v = input_value(ev);
+                                                                    update_step_at(&steps, i, |s| s.url = v);
+                                                                }/>
+                                                        </div>
+                                                        <div class="step-headers-label">"Заголовки шага"</div>
+                                                        <KvEditor
+                                                            get_rows=Callback::new(move |_: ()| steps.get_untracked().get(i).map(|s| s.headers.clone()).unwrap_or_default())
+                                                            set_rows=Callback::new(move |rs: Vec<KvRow>| {
+                                                                steps.update(|v| { if let Some(s) = v.get_mut(i) { s.headers = rs; } });
+                                                            })
+                                                            key_placeholder="Header"
+                                                            value_placeholder="Value"
+                                                            example_key="Authorization"
+                                                            example_value="Bearer 2f9c8e4d"
+                                                            preview_label="В запрос шага уйдёт:"
+                                                            preview=Callback::new(move |_: ()| "Authorization: Bearer 2f9c8e4d".to_string())
+                                                            empty_hint="Клик по строке — добавить"
+                                                        />
+                                                        <Show when={move || !is_bodyless(&step_at(&steps, i, |s| s.method.clone()))}>
+                                                            <textarea data-bh=format!("step.body.{i}") class="body-textarea step-body-textarea"
+                                                                placeholder="{\"hello\": \"{{name}}\"}" spellcheck="false"
+                                                                on:input=move |ev| {
+                                                                    let v = input_value(ev);
+                                                                    update_step_at(&steps, i, |s| s.body = v);
+                                                                }>{step_at_opt(&steps, i, |s| s.body.clone()).unwrap_or_default()}</textarea>
+                                                        </Show>
+                                                        <div class="step-row capture-row">
+                                                            <label>"Захват переменной:"</label>
+                                                            <input data-bh=format!("step.capture_name.{i}") class="kv-input" style="max-width:120px" placeholder="имя"
+                                                                spellcheck="false"
+                                                                value=move || step_at(&steps, i, |s| s.capture_name.clone())
+                                                                on:input=move |ev| {
+                                                                    let v: String = input_value(ev).chars()
+                                                                        .filter(|c| c.is_alphanumeric() || *c == '_')
+                                                                        .collect();
+                                                                    update_step_at(&steps, i, |s| s.capture_name = v);
+                                                                }/>
+                                                            <input data-bh=format!("step.capture_path.{i}") class="kv-input" placeholder="$.data.token"
+                                                                spellcheck="false"
+                                                                value=move || step_at(&steps, i, |s| s.capture_path.clone())
+                                                                on:input=move |ev| {
+                                                                    let v = input_value(ev);
+                                                                    update_step_at(&steps, i, |s| s.capture_path = v);
+                                                                }/>
+                                                            <button data-bh=format!("step.delete.{i}") class="kv-remove" title="Удалить шаг"
+                                                                on:click=move |_| {
+                                                                    if let Some(sid) = step_at_opt(&steps, i, |s| s.id.clone()) {
+                                                                        remove_step.run(sid);
+                                                                    }
+                                                                }>"×"</button>
+                                                        </div>
+                                                    </div>
+                                                </Show>
+                                            </div>
+                                        }
+                                        }}
+                                    />
+                                    <Show when={move || running.get()}>
+                                        <div class="steps-hint">"▶ Выполняем по шагам… правая панель показывает ответ текущего шага."</div>
+                                    </Show>
+                                </div>
+                            </Show>
+                            <Show when={move || tab.get() == "vars"}>
+                                <div>
+                                    <KvEditor
+                                        get_rows=Callback::new(move |_: ()| vars.get())
+                                        set_rows=Callback::new(move |rs: Vec<KvRow>| vars.set(rs))
+                                        key_placeholder="baseUrl"
+                                        value_placeholder="https://api.example.com"
+                                        example_key="baseUrl"
+                                        example_value="https://api.example.com"
+                                        preview=Callback::new(move |_: ()| "{{baseUrl}}/v1/users  →  https://api.example.com/v1/users".to_string())
+                                        empty_hint="Использовать в URL, заголовках и теле запроса"
+                                    />
+                                </div>
+                            </Show>
+                        </div>
+                    </section>
+
+                    <section class="pane">
+                        <Show when={move || response.get().is_some()} fallback={move || view! {
+                            <div class="empty-state">
+                                <Show when={move || loading.get() || running.get()} fallback={move || view! {
+                                    <p>"Отправьте запрос, чтобы увидеть ответ"</p>
+                                    <p class="empty-sub">
+                                        "Enter для отправки. Ответ появляется в реальном времени, пока API ещё отвечает. \
+                                         Сценарий (Steps) позволяет пройти цепочку запросов пошагово. CORS не мешает — \
+                                         запросы идут через локальный прокси."
+                                    </p>
+                                }}>
+                                    <span class="spinner big"/>
+                                    <p>{move || if running.get() { "Выполняется сценарий…" } else { "Ожидаем заголовки ответа…" }}</p>
+                                </Show>
+                            </div>
+                        }}>
+                            <div class="response-meta">
+                                {move || {
+                                    let r = response.get()?;
+                                    Some(view! {
+                                        <span class=format!("status-chip s-{}xx", r.status / 100)>
+                                            {format!("{} {}", r.status, r.status_text)}
+                                        </span>
+                                    })
+                                }}
+                                <Show when={move || response.get().map(|r| r.streaming).unwrap_or(false)}>
+                                    <span class="streaming-badge">"● поток"</span>
+                                </Show>
+                                <Show when={move || response.get().map(|r| r.cancelled).unwrap_or(false)}>
+                                    <span class="cancelled-badge">"⏹ остановлено"</span>
+                                </Show>
+                                {move || {
+                                    let r = response.get()?;
+                                    Some(view! {
+                                        <span class="meta-item">{format!("{:.0} ms", r.time_ms)}</span>
+                                        <span class="meta-item">{format_size(Some(r.bytes))}</span>
+                                    })
+                                }}
+                                <Show when={move || {
+                                    let r = response.get();
+                                    match r.as_ref() {
+                                        Some(resp) => !resp.final_url.is_empty() && resp.final_url != url.get(),
+                                        None => false,
+                                    }
+                                }}>
+                                    <span class="meta-item redirect" title="После редиректов">
+                                        {move || format!("→ {}", response.get().map(|r| r.final_url).unwrap_or_default())}
+                                    </span>
+                                </Show>
+                                <Show when={move || {
+                                    let r = response.get();
+                                    match r.as_ref() {
+                                        Some(resp) => resp.is_textual && !resp.streaming && !resp.body_text.is_empty(),
+                                        None => false,
+                                    }
+                                }}>
+                                    <CopyButton
+                                        title="Копировать форматированный JSON ответа"
+                                        ok=copied_resp.read_only()
+                                        on_copied=mark_copied(copied_resp)
+                                        get_text=Callback::new(move |_: ()| {
+                                            if let Some(resp) = response.get_untracked() {
+                                                pretty_json(&resp.body_text).unwrap_or(resp.body_text)
+                                            } else {
+                                                String::new()
+                                            }
+                                        })
+                                    />
+                                </Show>
+                                <Show when={move || {
+                                    let r = response.get();
+                                    match r.as_ref() {
+                                        Some(resp) => resp.is_textual && !resp.streaming,
+                                        None => false,
+                                    }
+                                }}>
+                                    <div class="body-view-toggle">
+                                        <button data-bh="response.view_pretty" class=move || if pretty.get() { "view-btn active" } else { "view-btn" }
+                                            on:click=move |_| pretty.set(true)>"Pretty"</button>
+                                        <button data-bh="response.view_raw" class=move || if !pretty.get() { "view-btn active" } else { "view-btn" }
+                                            on:click=move |_| pretty.set(false)>"Raw"</button>
+                                    </div>
+                                </Show>
+                            </div>
+                            <nav class="tabs">
+                                <div class="tab-track" id="resp-tabs" node_ref=resp_track>
+                                <span class="tab-pill"/>
+                                <button data-bh="response.tab_body" class=move || if resp_tab.get() == "body" { "tab active" } else { "tab" }
+                                    on:click=move |_| resp_tab.set("body".to_string())>"Response body"</button>
+                                <button data-bh="response.tab_headers" class=move || if resp_tab.get() == "headers" { "tab active" } else { "tab" }
+                                    on:click=move |_| resp_tab.set("headers".to_string())>"Response headers"</button>
+                                </div>
+                            </nav>
+                            <Show when={move || {
+                                let r = response.get();
+                                r.as_ref().map(|resp| resp.is_textual).unwrap_or(false) && resp_tab.get() == "body"
+                            }}>
+                                <div class="search-bar">
+                                    <span class="search-icon">"🔍"</span>
+                                    <input data-bh="response.search_input" id="hop-search-input" class="search-input" spellcheck="false"
+                                        placeholder="Search"
+                                        value=move || query.get()
+                                        on:input=move |ev| query.set(input_value(ev))
+                                        on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                            if ev.key() == "Enter" {
+                                                ev.prevent_default();
+                                                goto_match(if ev.shift_key() { -1 } else { 1 });
+                                            }
+                                        }/>
+                                    <span class=move || if match_count.get() != 0 { "search-count" } else { "search-count none" }>
+                                        {move || {
+                                            let q = query.get();
+                                            let mc = match_count.get();
+                                            if q.is_empty() {
+                                                String::new()
+                                            } else if mc == 0 {
+                                                "нет совпадений".to_string()
+                                            } else {
+                                                format!("{} / {}", cur_match.get() + 1, mc)
+                                            }
+                                        }}
+                                    </span>
+                                    <button data-bh="response.search_prev" class="search-nav" disabled=move || match_count.get() == 0
+                                        title="Предыдущее (Shift+Enter)" on:click=move |_| goto_match(-1)>"↑"</button>
+                                    <button data-bh="response.search_next" class="search-nav" disabled=move || match_count.get() == 0
+                                        title="Следующее (Enter)" on:click=move |_| goto_match(1)>"↓"</button>
+                                    <button data-bh="response.search_clear" class="search-nav" title="Очистить" on:click=move |_| query.set(String::new())>"✕"</button>
+                                </div>
+                            </Show>
+                            <div class="pane-body">
+                                <Show when={move || resp_tab.get() == "body"}>
+                                    {move || {
+                                        let r = response.get()?;
+                                        if let Some(src) = r.image_blob_url.as_ref() {
+                                            return Some(view! {
+                                                <img class="response-image" src={src.clone()} alt="response"/>
+                                            }.into_any());
+                                        }
+                                        if r.is_textual {
+                                            let lines = search.get().map(|s| s.lines.clone()).unwrap_or_default();
+                                            return Some(view! {
+                                                <div class="response-lines">
+                                                    <For
+                                                        each={move || lines.clone().into_iter().enumerate().collect::<Vec<_>>()}
+                                                        key=|(li, _)| *li
+                                                        children=move |(_, line)| {
+                                                            view! {
+                                                                <div class={move || {
+                                                                    let mut cls = String::from("code-line");
+                                                                    if line.hit { cls.push_str(" line-match"); }
+                                                                    if line.has_error { cls.push_str(" line-error"); }
+                                                                    if line.segs.iter().any(|s| s.mi == Some(cur_match.get())) {
+                                                                        cls.push_str(" line-current");
+                                                                    }
+                                                                    cls
+                                                                }}>
+                                                                    {line.segs.clone().into_iter().map(|seg| match seg.mi {
+                                                                        Some(mi) => view! {
+                                                                            <mark data-mi={mi}
+                                                                                class={move || if cur_match.get() == mi { "match current" } else { "match" }}>
+                                                                                {seg.text.clone()}
+                                                                            </mark>
+                                                                        }.into_any(),
+                                                                        None if seg.err => view! {
+                                                                            <span class="err-phrase">{seg.text.clone()}</span>
+                                                                        }.into_any(),
+                                                                        None => view! { <span>{seg.text.clone()}</span> }.into_any(),
+                                                                    }).collect::<Vec<_>>()}
+                                                                </div>
+                                                            }
+                                                        }
+                                                    />
+                                                </div>
+                                            }.into_any());
+                                        }
+                                        Some(view! {
+                                            <div class="binary-note">{move || {
+                                                let r = response.get()?;
+                                                Some(if r.streaming {
+                                                    format!("⏬ Получаем бинарные данные… {}", format_size(Some(r.bytes)))
+                                                } else {
+                                                    let ct = if r.content_type.is_empty() { "unknown".to_string() } else { r.content_type.clone() };
+                                                    format!("Двоичные данные ({}), {}", ct, format_size(Some(r.bytes)))
+                                                })
+                                            }}</div>
+                                        }.into_any())
+                                    }}
+                                </Show>
+                                <Show when={move || resp_tab.get() == "headers"}>
+                                    <table class="headers-table">
+                                        <tbody>
+                                            {move || {
+                                                let r = response.get()?;
+                                                Some(r.headers.iter().map(|(k, v)| view! {
+                                                    <tr>
+                                                        <td class="header-name">{k.clone()}</td>
+                                                        <td class="header-value">{v.clone()}</td>
+                                                    </tr>
+                                                }).collect::<Vec<_>>())
+                                            }}
+                                        </tbody>
+                                    </table>
+                                </Show>
+                            </div>
+                        </Show>
+                    </section>
+                </main>
+                </Show>
+                <Show when={move || api_panel.get()}>
+                    <div class="modal-overlay"
+                        on:click=move |ev| {
+                            let on_overlay = ev
+                                .target()
+                                .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
+                                .map(|t| t.class_list().contains("modal-overlay"))
+                                .unwrap_or(false);
+                            if on_overlay {
+                                api_panel.set(false);
+                            }
+                        }>
+                        <div class="modal api-modal">
+                            <div class="api-panel-head">
+                                <span>"запросы, присланные в API"</span>
+                                <span class="api-head-btns">
+                                    <button data-bh="api_log.refresh" class="api-refresh" title="Обновить"
+                                        on:click={move |_| refresh_api.run(())}>"↻"</button>
+                                    <button data-bh="api_log.close" class="api-refresh" title="Закрыть (Esc)"
+                                        on:click={move |_| api_panel.set(false)}>"✕"</button>
+                                </span>
+                            </div>
+                            <div class="api-list">
+    {move || {
+                                api_calls
+                                    .get()
+                                    .into_iter()
+                                    .rev()
+                                    .map(|c| {
+                                        let c2 = c.clone();
+                                        let mcls = format!("api-m m-{}", c.method);
+                                        let m = c.method.clone();
+                                        let u = c.url.clone();
+                                        let st = c.status.to_string();
+                                        let t = fmt_ts(c.ts);
+                                        view! {
+                                            <div class="api-item"
+                                                on:click={move |_| load_api_call.run(c2.clone())}>
+                                                <span class=mcls>{m}</span>
+                                                <span class="api-u">{u}</span>
+                                                <span class="api-s">{st}</span>
+                                                <span class="api-t">{t}</span>
+                                            </div>
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                            }}
+                            </div>
+                        </div>
+                    </div>
+                </Show>
+                <Show when={move || modal_open.get()}>
+                    <div class="modal-overlay"
+                        on:click=move |ev| {
+                            let on_overlay = ev
+                                .target()
+                                .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
+                                .map(|t| t.class_list().contains("modal-overlay"))
+                                .unwrap_or(false);
+                            if on_overlay {
+                                modal_open.set(false);
+                            }
+                        }>
+                        <div class="modal">
+                            <div class="modal-title">"Новая вкладка"</div>
+                            <input data-bh="modal.tab_name" class="modal-input" type="text" placeholder="Название вкладки"
+                                autofocus=true
+                                value=move || modal_name.get()
+                                on:input=move |ev| {
+                                    modal_name.set(input_value(ev));
+                                    modal_err.set(String::new());
                                 }
+                                on:keydown=move |ev| {
+                                    if ev.key() == "Enter" {
+                                        save_current.run(());
+                                    } else if ev.key() == "Escape" {
+                                        modal_open.set(false);
+                                    }
+                                } />
+                            <Show when={move || !modal_err.get().is_empty()}>
+                                <div class="modal-err">{move || modal_err.get()}</div>
+                            </Show>
+                            <div class="modal-actions">
+                                <button data-bh="modal.tab_save_confirm" class="modal-save" on:click=move |_| save_current.run(())>"Сохранить"</button>
+                                <button data-bh="modal.tab_save_cancel" class="modal-cancel" on:click=move |_| modal_open.set(false)>"Отмена"</button>
+                            </div>
+                        </div>
+                    </div>
+                </Show>
+                <Show when={move || del_confirm.get().is_some()}>
+                    <div class="modal-overlay"
+                        on:click=move |ev| {
+                            let on_overlay = ev
+                                .target()
+                                .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
+                                .map(|t| t.class_list().contains("modal-overlay"))
+                                .unwrap_or(false);
+                            if on_overlay {
                                 del_confirm.set(None);
-                            }>"Удалить"</button>
-                            <button data-bh="modal.tab_del_cancel" class="modal-cancel" on:click=move |_| del_confirm.set(None)>"Отмена"</button>
+                            }
+                        }>
+                        <div class="modal">
+                            <div class="modal-title">"Удалить вкладку?"</div>
+                            <div class="modal-actions">
+                                <button data-bh="modal.tab_del_confirm" class="modal-save danger" on:click=move |_| {
+                                    if let Some(id) = del_confirm.get_untracked() {
+                                        delete_saved.run(id);
+                                    }
+                                    del_confirm.set(None);
+                                }>"Удалить"</button>
+                                <button data-bh="modal.tab_del_cancel" class="modal-cancel" on:click=move |_| del_confirm.set(None)>"Отмена"</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </Show>
-            <Show when={move || group_modal.get()}>
-                <div class="modal-overlay"
-                    on:click=move |ev| {
-                        let on_overlay = ev
-                            .target()
-                            .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
-                            .map(|t| t.class_list().contains("modal-overlay"))
-                            .unwrap_or(false);
-                        if on_overlay {
-                            group_modal.set(false);
+                </Show>
+                <Show when={move || group_modal.get()}>
+                    <div class="modal-overlay"
+                        on:click=move |ev| {
+                            let on_overlay = ev
+                                .target()
+                                .and_then(|t| t.dyn_ref::<web_sys::HtmlElement>().cloned())
+                                .map(|t| t.class_list().contains("modal-overlay"))
+                                .unwrap_or(false);
+                            if on_overlay {
+                                group_modal.set(false);
+                            }
+                        }>
+                        <div class="modal">
+                            <div class="modal-title">"Облако заполнено"</div>
+                            <div class="modal-hint">"Все вкладки объединятся в группу. Клик по значку группы вернёт их в облако."</div>
+                            <input data-bh="modal.group_name" class="modal-input" type="text" placeholder="Имя группы"
+                                autofocus=true
+                                value=move || group_name.get()
+                                on:input=move |ev| group_name.set(input_value(ev))
+                                on:keydown=move |ev| {
+                                    if ev.key() == "Enter" {
+                                        save_group.run(());
+                                    } else if ev.key() == "Escape" {
+                                        group_modal.set(false);
+                                    }
+                                } />
+                            <div class="modal-actions">
+                                <button data-bh="modal.group_create" class="modal-save" on:click=move |_| save_group.run(())>"Создать группу"</button>
+                                <button data-bh="modal.group_cancel" class="modal-cancel" on:click=move |_| group_modal.set(false)>"Отмена"</button>
+                            </div>
+                        </div>
+                    </div>
+                </Show>
+                <div class="bottom-dock">
+                <button data-bh="bottom.logs_toggle" class="actlog-toggle"
+                    on:click=move |_| {
+                        if !log_open.get_untracked() {
+                            log_h.set(60);
+                            trf_open.set(false);
                         }
+                        log_open.update(|o| *o = !*o);
                     }>
-                    <div class="modal">
-                        <div class="modal-title">"Облако заполнено"</div>
-                        <div class="modal-hint">"Все вкладки объединятся в группу. Клик по значку группы вернёт их в облако."</div>
-                        <input data-bh="modal.group_name" class="modal-input" type="text" placeholder="Имя группы"
-                            autofocus=true
-                            value=move || group_name.get()
-                            on:input=move |ev| group_name.set(input_value(ev))
-                            on:keydown=move |ev| {
-                                if ev.key() == "Enter" {
-                                    save_group.run(());
-                                } else if ev.key() == "Escape" {
-                                    group_modal.set(false);
-                                }
-                            } />
-                        <div class="modal-actions">
-                            <button data-bh="modal.group_create" class="modal-save" on:click=move |_| save_group.run(())>"Создать группу"</button>
-                            <button data-bh="modal.group_cancel" class="modal-cancel" on:click=move |_| group_modal.set(false)>"Отмена"</button>
+                    "Logs"
+                    <span class="actlog-count">{move || act_log.get().len()}</span>
+                </button>
+                <button data-bh="bottom.traffic_toggle" class="actlog-toggle"
+                    on:click=move |_| {
+                        if !trf_open.get_untracked() {
+                            trf_h.set(60);
+                            log_open.set(false);
+                        }
+                        trf_open.update(|o| *o = !*o);
+                    }>
+                    "Трафик"
+                    <span class="actlog-count">{move || trf_log.get().len()}</span>
+                </button>
+                </div>
+                <Show when=move || log_open.get()>
+                    <div class="actlog" style=move || {
+                        let cap = tab_bottom_gap().unwrap_or(i32::MAX);
+                        format!("height:{}px", log_h.get().min(cap))
+                    }>
+                        <div class="actlog-resize"
+                            title="Потянуть вверх/вниз — высота журнала"
+                            on:pointerdown=move |ev: web_sys::PointerEvent| {
+                                crate::ui::start_log_drag(&ev, log_h);
+                            }></div>
+                        <div class="actlog-body">
+                            {move || {
+                                let v: Vec<String> = act_log.get().into_iter().rev().take(100).collect();
+                                v.into_iter()
+                                    .map(|line| view! { <div class="actlog-line">{line}</div> })
+                                    .collect::<Vec<_>>()
+                            }}
                         </div>
                     </div>
-                </div>
-            </Show>
-            <div class="bottom-dock">
-            <button data-bh="bottom.logs_toggle" class="actlog-toggle"
-                on:click=move |_| {
-                    if !log_open.get_untracked() {
-                        log_h.set(60);
-                        trf_open.set(false);
-                    }
-                    log_open.update(|o| *o = !*o);
-                }>
-                "Logs"
-                <span class="actlog-count">{move || act_log.get().len()}</span>
-            </button>
-            <button data-bh="bottom.traffic_toggle" class="actlog-toggle"
-                on:click=move |_| {
-                    if !trf_open.get_untracked() {
-                        trf_h.set(60);
-                        log_open.set(false);
-                    }
-                    trf_open.update(|o| *o = !*o);
-                }>
-                "Трафик"
-                <span class="actlog-count">{move || trf_log.get().len()}</span>
-            </button>
+                </Show>
+                <Show when=move || trf_open.get()>
+                    <div class="actlog" style=move || {
+                        let cap = tab_bottom_gap().unwrap_or(i32::MAX);
+                        format!("height:{}px", trf_h.get().min(cap))
+                    }>
+                        <div class="actlog-resize"
+                            title="Потянуть вверх/вниз — высота панели"
+                            on:pointerdown=move |ev: web_sys::PointerEvent| {
+                                crate::ui::start_log_drag(&ev, trf_h);
+                            }></div>
+                        <div class="actlog-body">
+                            {move || {
+                                let v: Vec<String> = trf_log.get().into_iter().rev().take(200).collect();
+                                v.into_iter()
+                                    .map(|line| view! { <div class="actlog-line">{line}</div> })
+                                    .collect::<Vec<_>>()
+                            }}
+                        </div>
+                    </div>
+                </Show>
             </div>
-            <Show when=move || log_open.get()>
-                <div class="actlog" style=move || {
-                    let cap = tab_bottom_gap().unwrap_or(i32::MAX);
-                    format!("height:{}px", log_h.get().min(cap))
-                }>
-                    <div class="actlog-resize"
-                        title="Потянуть вверх/вниз — высота журнала"
-                        on:pointerdown=move |ev: web_sys::PointerEvent| {
-                            crate::ui::start_log_drag(&ev, log_h);
-                        }></div>
-                    <div class="actlog-body">
-                        {move || {
-                            let v: Vec<String> = act_log.get().into_iter().rev().take(100).collect();
-                            v.into_iter()
-                                .map(|line| view! { <div class="actlog-line">{line}</div> })
-                                .collect::<Vec<_>>()
-                        }}
-                    </div>
-                </div>
-            </Show>
-            <Show when=move || trf_open.get()>
-                <div class="actlog" style=move || {
-                    let cap = tab_bottom_gap().unwrap_or(i32::MAX);
-                    format!("height:{}px", trf_h.get().min(cap))
-                }>
-                    <div class="actlog-resize"
-                        title="Потянуть вверх/вниз — высота панели"
-                        on:pointerdown=move |ev: web_sys::PointerEvent| {
-                            crate::ui::start_log_drag(&ev, trf_h);
-                        }></div>
-                    <div class="actlog-body">
-                        {move || {
-                            let v: Vec<String> = trf_log.get().into_iter().rev().take(200).collect();
-                            v.into_iter()
-                                .map(|line| view! { <div class="actlog-line">{line}</div> })
-                                .collect::<Vec<_>>()
-                        }}
-                    </div>
-                </div>
-            </Show>
-        </div>
-    }
+        }
 }
 
 /* помещаются ли все чипы облака в одну строку хедера */

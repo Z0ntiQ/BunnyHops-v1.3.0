@@ -2,10 +2,14 @@
 
 use wasm_bindgen::prelude::*;
 
-
 pub fn ts_short() -> String {
     let d = js_sys::Date::new_0();
-    format!("{:02}:{:02}:{:02}", d.get_hours(), d.get_minutes(), d.get_seconds())
+    format!(
+        "{:02}:{:02}:{:02}",
+        d.get_hours(),
+        d.get_minutes(),
+        d.get_seconds()
+    )
 }
 
 pub fn fmt_ts(ts: u64) -> String {
@@ -16,7 +20,12 @@ pub fn fmt_ts(ts: u64) -> String {
 /// Время ЧЧ:ММ:СС из серверного unix-времени (для панели единого журнала).
 pub fn ts_at(ts: u64) -> String {
     let d = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
-    format!("{:02}:{:02}:{:02}", d.get_hours(), d.get_minutes(), d.get_seconds())
+    format!(
+        "{:02}:{:02}:{:02}",
+        d.get_hours(),
+        d.get_minutes(),
+        d.get_seconds()
+    )
 }
 
 /// Единый логер: событие UI уходит в серверный журнал (POST /debug/log).

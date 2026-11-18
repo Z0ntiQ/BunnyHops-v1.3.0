@@ -32,7 +32,8 @@ const HOP_BY_HOP: &[&str] = &[
     "expect",
 ];
 
-static RUNNING_SERVERS: OnceLock<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>> = OnceLock::new();
+static RUNNING_SERVERS: OnceLock<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>> =
+    OnceLock::new();
 static TRAFFIC_STORE: OnceLock<Mutex<HashMap<String, VecDeque<TrafficEntry>>>> = OnceLock::new();
 static CYCLE_COUNTERS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
 
@@ -56,9 +57,18 @@ pub fn control_snapshot() -> serde_json::Value {
         .collect();
     let running_count = servers
         .iter()
-        .filter(|s| s.get("running").and_then(serde_json::Value::as_bool).unwrap_or(false))
+        .filter(|s| {
+            s.get("running")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        })
         .count();
-    let traffic_total: usize = traffic_store().lock().unwrap().values().map(|q| q.len()).sum();
+    let traffic_total: usize = traffic_store()
+        .lock()
+        .unwrap()
+        .values()
+        .map(|q| q.len())
+        .sum();
     serde_json::json!({
         "servers": servers,
         "running_count": running_count,
@@ -273,7 +283,7 @@ fn unix_now() -> f64 {
 
 /// Порядок списка профилей: история (по времени создания) по умолчанию,
 /// `order=alpha` — по имени; `dir=desc` — реверс (запрос пользователя 17.11.2026).
-fn sort_profiles(v: &mut Vec<ProfileSummary>, order: &str, dir: &str) {
+fn sort_profiles(v: &mut [ProfileSummary], order: &str, dir: &str) {
     use std::cmp::Ordering;
     if order == "alpha" {
         v.sort_by(|a, b| natural_cmp(&a.name, &b.name));
@@ -319,10 +329,7 @@ fn get_traffic(name: &str) -> Vec<TrafficEntry> {
         .collect()
 }
 
-async fn gateway_handler(
-    State(profile_name): State<String>,
-    req: Request,
-) -> Response {
+async fn gateway_handler(State(profile_name): State<String>, req: Request) -> Response {
     let start = SystemTime::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -384,13 +391,20 @@ async fn gateway_handler(
                     *idx
                 }
                 None => {
-                    let i = rule.variants.iter().position(|v| v.id == variant.id).unwrap_or(0);
+                    let i = rule
+                        .variants
+                        .iter()
+                        .position(|v| v.id == variant.id)
+                        .unwrap_or(0);
                     counters.insert(key, i);
                     i
                 }
             }
         } else {
-            rule.variants.iter().position(|v| v.id == variant.id).unwrap_or(0)
+            rule.variants
+                .iter()
+                .position(|v| v.id == variant.id)
+                .unwrap_or(0)
         };
         let chosen = rule.variants.get(chosen_idx).unwrap_or(variant);
         if chosen.delay_ms > 0 {
@@ -435,12 +449,7 @@ async fn gateway_handler(
     json_error("no matching rule", StatusCode::NOT_FOUND)
 }
 
-async fn proxy_upstream(
-    upstream: &str,
-    method: Method,
-    path: String,
-    req: Request,
-) -> Response {
+async fn proxy_upstream(upstream: &str, method: Method, path: String, req: Request) -> Response {
     let client = Client::new();
     let url = format!("{upstream}{path}");
     let mut builder = client.request(method.clone(), &url);
@@ -545,7 +554,11 @@ async fn profile_post_handler(Json(mut profile): Json<Profile>) -> Response {
     if let Err(e) = save_profile(&profile) {
         return json_error(&e, StatusCode::BAD_REQUEST);
     }
-    crate::control::log_action("mock", "profile.save", serde_json::json!({"name": profile.name, "port": profile.listen_port}));
+    crate::control::log_action(
+        "mock",
+        "profile.save",
+        serde_json::json!({"name": profile.name, "port": profile.listen_port}),
+    );
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
@@ -559,7 +572,11 @@ async fn profile_delete_handler(Json(body): Json<DeleteBody>) -> Response {
     // existed в записи: «удалено» и «такого профиля не было» различимы в журнале.
     let existed = path.exists();
     let _ = fs::remove_file(path);
-    crate::control::log_action("mock", "profile.delete", serde_json::json!({"name": name, "existed": existed}));
+    crate::control::log_action(
+        "mock",
+        "profile.delete",
+        serde_json::json!({"name": name, "existed": existed}),
+    );
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
@@ -573,7 +590,8 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
         Err(_) => return json_error("profile not found", StatusCode::BAD_REQUEST),
     };
     if running_servers().lock().unwrap().contains_key(&name) {
-        return Json(serde_json::json!({ "ok": true, "port": profile.listen_port })).into_response();
+        return Json(serde_json::json!({ "ok": true, "port": profile.listen_port }))
+            .into_response();
     }
     let port = profile.listen_port;
     let name_clone = name.clone();
@@ -584,14 +602,22 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
         Ok(l) => l,
         Err(e) => {
             let msg = format!("bind {port}: {e}");
-            crate::control::log_action("mock", "start.fail", serde_json::json!({"name": name, "port": port, "error": msg}));
+            crate::control::log_action(
+                "mock",
+                "start.fail",
+                serde_json::json!({"name": name, "port": port, "error": msg}),
+            );
             return json_error(&msg, StatusCode::BAD_GATEWAY);
         }
     };
     let handle = tokio::spawn(async move {
         run_mock_server(listener, name_clone).await;
     });
-    crate::control::log_action("mock", "start", serde_json::json!({"name": name, "port": port}));
+    crate::control::log_action(
+        "mock",
+        "start",
+        serde_json::json!({"name": name, "port": port}),
+    );
     running_servers().lock().unwrap().insert(name, handle);
     Json(serde_json::json!({ "ok": true, "port": port })).into_response()
 }
@@ -618,9 +644,9 @@ async fn status_handler() -> Json<Value> {
     let running: Vec<_> = servers
         .keys()
         .filter_map(|name| {
-            load_profile(name).ok().map(|p| {
-                serde_json::json!({ "name": name, "port": p.listen_port })
-            })
+            load_profile(name)
+                .ok()
+                .map(|p| serde_json::json!({ "name": name, "port": p.listen_port }))
         })
         .collect();
     Json(serde_json::json!({ "running": running }))
@@ -639,7 +665,8 @@ async fn traffic_handler(Query(q): Query<NameQuery>) -> Json<Value> {
                 let store = traffic_store().lock().unwrap();
                 for (prof, deque) in store.iter() {
                     for t in deque.iter() {
-                        if let Value::Object(mut o) = serde_json::to_value(t).unwrap_or(Value::Null) {
+                        if let Value::Object(mut o) = serde_json::to_value(t).unwrap_or(Value::Null)
+                        {
                             o.insert("profile".into(), Value::String(prof.clone()));
                             all.push(Value::Object(o));
                         }
@@ -647,7 +674,9 @@ async fn traffic_handler(Query(q): Query<NameQuery>) -> Json<Value> {
                 }
             }
             all.sort_by(|a, b| {
-                a.get("ts").and_then(|x| x.as_f64()).unwrap_or(0.0)
+                a.get("ts")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.0)
                     .partial_cmp(&b.get("ts").and_then(|x| x.as_f64()).unwrap_or(0.0))
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
@@ -724,8 +753,8 @@ pub(crate) fn clear_traffic() {
 
 /// Сохранение профиля mock из JSON той же схемы, что читает /debug/mock/profile.
 pub(crate) fn save_profile_value(value: &Value) -> Result<(), String> {
-    let profile: Profile = serde_json::from_value(value.clone())
-        .map_err(|e| format!("схема профиля: {e}"))?;
+    let profile: Profile =
+        serde_json::from_value(value.clone()).map_err(|e| format!("схема профиля: {e}"))?;
     sanitize_name(&profile.name)?;
     save_profile(&profile)
 }

@@ -1,7 +1,7 @@
 //! UI-компоненты: KvEditor, CopyButton, чипы статуса — 1:1 с App.jsx.
 
-use leptos::prelude::*;
 use leptos::callback::Callable;
+use leptos::prelude::*;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -10,6 +10,10 @@ use crate::logic::{format_size, KvRow};
 
 pub const METHODS: [&str; 7] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 pub const BODYLESS: [&str; 2] = ["GET", "HEAD"];
+
+/// Держатель установленного PointerEvent-обработчика (снять при отпускании).
+type PtrHandler =
+    std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::PointerEvent)>>>>;
 
 pub fn is_bodyless(m: &str) -> bool {
     BODYLESS.contains(&m)
@@ -37,14 +41,37 @@ fn parse_kv_text(text: &str) -> Vec<KvRow> {
                 .chars()
                 .filter(|c| {
                     c.is_ascii_alphanumeric()
-                        || matches!(c, '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.' | '^' | '_' | '`' | '|' | '~')
+                        || matches!(
+                            c,
+                            '!' | '#'
+                                | '$'
+                                | '%'
+                                | '&'
+                                | '\''
+                                | '*'
+                                | '+'
+                                | '-'
+                                | '.'
+                                | '^'
+                                | '_'
+                                | '`'
+                                | '|'
+                                | '~'
+                        )
                 })
                 .collect();
             if key.is_empty() {
                 return None;
             }
-            let value: String = v.chars().filter(|c| matches!(c, '\u{20}'..='\u{7e}')).collect();
-            Some(KvRow { key, value: value.trim_end().to_string(), on: true })
+            let value: String = v
+                .chars()
+                .filter(|c| matches!(c, '\u{20}'..='\u{7e}'))
+                .collect();
+            Some(KvRow {
+                key,
+                value: value.trim_end().to_string(),
+                on: true,
+            })
         })
         .collect()
 }
@@ -77,11 +104,9 @@ pub fn start_log_drag(ev: &web_sys::PointerEvent, lh: RwSignal<i32>) {
             let _ = he.set_pointer_capture(ev.pointer_id());
         }
     }
-    let drag_start = create_rw_signal(Some((ev.client_y(), lh.get_untracked())));
-    let mv: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::PointerEvent)>>>> =
-        std::rc::Rc::new(std::cell::RefCell::new(None));
-    let up: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::PointerEvent)>>>> =
-        std::rc::Rc::new(std::cell::RefCell::new(None));
+    let drag_start = RwSignal::new(Some((ev.client_y(), lh.get_untracked())));
+    let mv: PtrHandler = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let up: PtrHandler = std::rc::Rc::new(std::cell::RefCell::new(None));
     let mv_c = Closure::wrap(Box::new(move |ev: web_sys::PointerEvent| {
         if let Some((y0, h0)) = drag_start.get() {
             let max = log_h_max();
@@ -94,12 +119,12 @@ pub fn start_log_drag(ev: &web_sys::PointerEvent, lh: RwSignal<i32>) {
         crate::storage::ls_set("hoplite.logH", &lh.get_untracked().to_string());
         if let Some(w) = web_sys::window() {
             if let Some(m) = mv2.borrow().as_ref() {
-                let _ = w.remove_event_listener_with_callback(
-                    "pointermove", m.as_ref().unchecked_ref());
+                let _ = w
+                    .remove_event_listener_with_callback("pointermove", m.as_ref().unchecked_ref());
             }
             if let Some(u) = up2.borrow().as_ref() {
-                let _ = w.remove_event_listener_with_callback(
-                    "pointerup", u.as_ref().unchecked_ref());
+                let _ =
+                    w.remove_event_listener_with_callback("pointerup", u.as_ref().unchecked_ref());
             }
         }
         // снять с себя владение, но НЕ дропать: up-замыкание
@@ -108,17 +133,17 @@ pub fn start_log_drag(ev: &web_sys::PointerEvent, lh: RwSignal<i32>) {
         std::mem::forget(up2.borrow_mut().take());
     }) as Box<dyn FnMut(_)>);
     if let Some(w) = web_sys::window() {
-        let _ = w.add_event_listener_with_callback(
-            "pointermove", mv_c.as_ref().unchecked_ref());
-        let _ = w.add_event_listener_with_callback(
-            "pointerup", up_c.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback("pointermove", mv_c.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback("pointerup", up_c.as_ref().unchecked_ref());
     }
     *mv.borrow_mut() = Some(mv_c);
     *up.borrow_mut() = Some(up_c);
 }
 
 fn log_h_max() -> i32 {
-    let Some(win) = web_sys::window() else { return 600 };
+    let Some(win) = web_sys::window() else {
+        return 600;
+    };
     let inner = win
         .inner_height()
         .ok()
@@ -179,31 +204,28 @@ pub fn KvEditor(
     #[prop(default = "")] example_value: &'static str,
     #[prop(default = "")] empty_hint: &'static str,
     /* «фактический результат» примера: метка + текст (URL, заголовок, подстановка).
-       Текст может читать сигналы — обновляется реактивно (17.11.2026). */
+    Текст может читать сигналы — обновляется реактивно (17.11.2026). */
     #[prop(default = "")] preview_label: &'static str,
     #[prop(optional)] preview: Option<Callback<(), String>>,
 ) -> impl IntoView {
-    let bulk_open = create_rw_signal(false);
-    let bulk_text = create_rw_signal(String::new());
-    let bulk_ta = create_node_ref::<leptos::html::Textarea>();
+    let bulk_open = RwSignal::new(false);
+    let bulk_text = RwSignal::new(String::new());
+    let bulk_ta = NodeRef::<leptos::html::Textarea>::new();
 
     // Открытие: наполнить поле из строк, показать панель, увести фокус в textarea.
-    let open_bulk = {
-        let get_rows = get_rows;
-        move |_: leptos::ev::MouseEvent| {
-            bulk_text.set(kv_to_text(&get_rows.run(())));
-            bulk_open.set(true);
-            if let Some(w) = web_sys::window() {
-                let cb = Closure::once_into_js(move || {
-                    if let Some(el) = bulk_ta.get() {
-                        let _ = el.focus();
-                    }
-                });
-                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                    cb.as_ref().unchecked_ref(),
-                    60,
-                );
-            }
+    let open_bulk = move |_: leptos::ev::MouseEvent| {
+        bulk_text.set(kv_to_text(&get_rows.run(())));
+        bulk_open.set(true);
+        if let Some(w) = web_sys::window() {
+            let cb = Closure::once_into_js(move || {
+                if let Some(el) = bulk_ta.get() {
+                    let _ = el.focus();
+                }
+            });
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                60,
+            );
         }
     };
     let close_bulk = move |_: leptos::ev::MouseEvent| bulk_open.set(false);
@@ -211,7 +233,11 @@ pub fn KvEditor(
     /* клик по строке-примеру добавляет настоящую строку — тот же путь, что «+ Add new» */
     let add_row = move |_: leptos::ev::MouseEvent| {
         let mut rs = get_rows.run(());
-        rs.push(KvRow { key: String::new(), value: String::new(), on: true });
+        rs.push(KvRow {
+            key: String::new(),
+            value: String::new(),
+            on: true,
+        });
         set_rows.run(rs);
     };
 
@@ -295,15 +321,15 @@ pub fn KvEditor(
                 each={move || get_rows.run(()).into_iter().enumerate().collect::<Vec<_>>()}
                 key={|(i, _)| *i}
                 children={move |(i, row)| {
-                    let key_ref = create_node_ref::<leptos::html::Input>();
-                    let val_ref = create_node_ref::<leptos::html::Input>();
-                    let chk_ref = create_node_ref::<leptos::html::Input>();
+                    let key_ref = NodeRef::<leptos::html::Input>::new();
+                    let val_ref = NodeRef::<leptos::html::Input>::new();
+                    let chk_ref = NodeRef::<leptos::html::Input>::new();
                     /* плейсхолдеры строки печатаются один раз при её появлении,
                        как в поле URL (17.11.2026); у строк со значением плейсхолдер скрыт */
-                    let ph_key = create_rw_signal(String::new());
-                    let ph_val = create_rw_signal(String::new());
+                    let ph_key = RwSignal::new(String::new());
+                    let ph_val = RwSignal::new(String::new());
                     type_placeholders_once(key_placeholder, value_placeholder, ph_key, ph_val);
-                    create_effect(move |_| {
+                    Effect::new(move |_| {
                         let rs = get_rows.run(());
                         if let Some(r) = rs.get(i) {
                             if let Some(el) = chk_ref.get() {
@@ -420,11 +446,15 @@ fn KvEmptyState(
 ) -> impl IntoView {
     let add_row = move |_: leptos::ev::MouseEvent| {
         let mut rs = get_rows.run(());
-        rs.push(KvRow { key: String::new(), value: String::new(), on: true });
+        rs.push(KvRow {
+            key: String::new(),
+            value: String::new(),
+            on: true,
+        });
         set_rows.run(rs);
     };
-    let ph_key = create_rw_signal(String::new());
-    let ph_val = create_rw_signal(String::new());
+    let ph_key = RwSignal::new(String::new());
+    let ph_val = RwSignal::new(String::new());
     type_placeholders_once(example_key, example_value, ph_key, ph_val);
     view! {
         <button data-bh="kv.add_empty" class="kv-empty" on:click=add_row title="Добавить строку">
@@ -464,11 +494,8 @@ async fn copy_text(text: &str) -> bool {
     }
     // фолбэк: скрытый textarea + document.execCommand('copy')
     let doc = win.document().unwrap();
-    let ta: web_sys::HtmlTextAreaElement = doc
-        .create_element("textarea")
-        .unwrap()
-        .dyn_into()
-        .unwrap();
+    let ta: web_sys::HtmlTextAreaElement =
+        doc.create_element("textarea").unwrap().dyn_into().unwrap();
     ta.set_value(text);
     let style = ta.dyn_ref::<web_sys::HtmlElement>().unwrap().style();
     let _ = style.set_property("position", "fixed");
@@ -628,7 +655,9 @@ pub fn new_id() -> String {
 }
 
 pub fn js_now() -> f64 {
-    web_sys::window().map(|w| w.performance().unwrap().now()).unwrap_or(0.0)
+    web_sys::window()
+        .map(|w| w.performance().unwrap().now())
+        .unwrap_or(0.0)
 }
 
 pub fn js_random() -> f64 {

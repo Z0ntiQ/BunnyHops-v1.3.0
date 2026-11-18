@@ -1,8 +1,7 @@
 //! actlog: вынесено из app.rs (атомарные модули, правило пользователя 13.11.2026).
 
-use wasm_bindgen::JsCast;
 use crate::timefmt::ts_at;
-
+use wasm_bindgen::JsCast;
 
 #[derive(serde::Deserialize)]
 pub struct LogItem {
@@ -15,7 +14,11 @@ pub struct LogItem {
 
 pub fn render_log_item(it: &LogItem) -> String {
     if it.area == "ui" && it.action == "note" {
-        let msg = it.details.get("msg").and_then(serde_json::Value::as_str).unwrap_or("");
+        let msg = it
+            .details
+            .get("msg")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
         return format!("{} {}", ts_at(it.ts), msg);
     }
     let det = match &it.details {
@@ -71,7 +74,12 @@ pub async fn fetch_traffic_log() -> Vec<String> {
         .map(|t| {
             format!(
                 "{} [{}] {} {} -> {} {}ms",
-                ts_at(t.ts as u64), t.profile, t.method, t.path, t.status, t.ms
+                ts_at(t.ts as u64),
+                t.profile,
+                t.method,
+                t.path,
+                t.status,
+                t.ms
             )
         })
         .collect()

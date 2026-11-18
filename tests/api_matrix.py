@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
 """Full functional API matrix for bunny-hops-server on :3000."""
-import json, gzip, http.server, socketserver, threading, urllib.request, urllib.error, sys, time, os
+import gzip
+import http.server
+import json
+import os
+import socketserver
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 ECHO_PORT = 8099
 BASE = os.environ.get("HOP_URL", "http://localhost:3000").rstrip("/")
@@ -40,16 +50,21 @@ class Echo(http.server.BaseHTTPRequestHandler):
             loc = f"/redirect/{left-1}" if left > 0 else "/final"
             self.send_response(302)
             self.send_header("Location", loc)
-            self.end_headers(); return
+            self.end_headers()
+            return
         if p.startswith("/status/"):
             self._send(int(p.split("/")[-1]), b'{"code":"teapot"}')
             return
         if p == "/gz":
-            self._send(200, b'{"gz":"ok"}', gz=True); return
+            self._send(200, b'{"gz":"ok"}', gz=True)
+            return
         if p == "/bin":
-            self._send(200, bytes(range(256)), ctype="application/octet-stream"); return
+            self._send(200, bytes(range(256)), ctype="application/octet-stream")
+            return
         if p == "/slow":
-            time.sleep(30); self._send(200, b'{"slow":1}'); return
+            time.sleep(30)
+            self._send(200, b'{"slow":1}')
+            return
         echo = {
             "method": self.command,
             "path": p,
@@ -84,7 +99,6 @@ def check(name, cond, detail=""):
 
 E = f"http://127.0.0.1:{ECHO_PORT}"
 def P(u): return f"/debug/proxy?url={urllib.parse.quote(u, safe='')}"
-import urllib.parse
 
 # ---------- 1. proxy: bad input ----------
 st, _, b = call("GET", "/debug/proxy")

@@ -13,13 +13,13 @@
 use axum::body::to_bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, Request};
-use std::collections::HashMap;
 use axum::http::{Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -83,7 +83,9 @@ pub(crate) fn publish(event: Value) {
 
 /// Событие из журнала действий: вызывается из `control::log_action`.
 pub(crate) fn publish_action(area: &str, action: &str, details: &Value) {
-    publish(json!({"type": "action", "area": area, "action": action, "details": details, "ts": now_epoch()}))
+    publish(
+        json!({"type": "action", "area": area, "action": action, "details": details, "ts": now_epoch()}),
+    )
 }
 
 fn now_epoch() -> u64 {
@@ -129,11 +131,21 @@ fn ui_store() -> &'static Mutex<Value> {
 }
 
 pub(crate) fn ui_seq() -> u64 {
-    ui_store().lock().unwrap().get("seq").and_then(Value::as_u64).unwrap_or(0)
+    ui_store()
+        .lock()
+        .unwrap()
+        .get("seq")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
 }
 
 pub(crate) fn ui_state() -> Value {
-    ui_store().lock().unwrap().get("state").cloned().unwrap_or(json!({}))
+    ui_store()
+        .lock()
+        .unwrap()
+        .get("state")
+        .cloned()
+        .unwrap_or(json!({}))
 }
 
 async fn ui_state_handler(Json(body): Json<Value>) -> Response {
@@ -212,9 +224,14 @@ pub(crate) fn eval_predicate(store: &Value, predicate: &Value) -> Option<Value> 
     match kind {
         "element" => {
             let id = predicate.get("id").and_then(Value::as_str)?;
-            let state = predicate.get("state").and_then(Value::as_str).unwrap_or("present");
+            let state = predicate
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("present");
             let elements = store.get("elements").and_then(Value::as_array)?;
-            let el = elements.iter().find(|e| e.get("id").and_then(Value::as_str) == Some(id));
+            let el = elements
+                .iter()
+                .find(|e| e.get("id").and_then(Value::as_str) == Some(id));
             match state {
                 "present" => el.cloned(),
                 "absent" => {
@@ -227,15 +244,24 @@ pub(crate) fn eval_predicate(store: &Value, predicate: &Value) -> Option<Value> 
                 "enabled" => {
                     let el = el?;
                     let enabled = el.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                    if enabled { Some(el.clone()) } else { None }
+                    if enabled {
+                        Some(el.clone())
+                    } else {
+                        None
+                    }
                 }
                 "disabled" => {
                     let el = el?;
                     let enabled = el.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                    if !enabled { Some(el.clone()) } else { None }
+                    if !enabled {
+                        Some(el.clone())
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
-            }.and_then(|matched| {
+            }
+            .and_then(|matched| {
                 // Optional value check
                 if let Some(expected) = predicate.get("value") {
                     let actual = matched.get("value");
@@ -289,7 +315,11 @@ fn diff_into(prefix: &str, a: &Value, b: &Value, out: &mut Map<String, Value>, b
         keys.sort();
         keys.dedup();
         for k in keys {
-            let path = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+            let path = if prefix.is_empty() {
+                k.clone()
+            } else {
+                format!("{prefix}.{k}")
+            };
             diff_into(
                 &path,
                 ac.get(k).unwrap_or(&Value::Null),
@@ -324,7 +354,10 @@ async fn apply_write(path: &str, value: Value, merge: bool) -> Result<Value, (St
             .unwrap_or("")
             .to_string();
         if !["dark", "light"].contains(&mode.as_str()) {
-            return Err((StatusCode::BAD_REQUEST, "config.theme: dark или light".into()));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "config.theme: dark или light".into(),
+            ));
         }
         control::write_store("theme.json", &json!({"mode": mode}))
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -339,10 +372,17 @@ async fn apply_write(path: &str, value: Value, merge: bool) -> Result<Value, (St
             return Ok(wait_ui_echo(seq_before).await);
         }
     }
-    Err((StatusCode::BAD_REQUEST, format!("путь «{path}» не перезаписывается через Debug API")))
+    Err((
+        StatusCode::BAD_REQUEST,
+        format!("путь «{path}» не перезаписывается через Debug API"),
+    ))
 }
 
-async fn apply_profile_write(name: &str, value: Value, merge: bool) -> Result<Value, (StatusCode, String)> {
+async fn apply_profile_write(
+    name: &str,
+    value: Value,
+    merge: bool,
+) -> Result<Value, (StatusCode, String)> {
     if value.is_null() {
         mock_server::delete_profile(name)
             .await
@@ -401,7 +441,10 @@ pub(crate) fn is_known_action(action: &str) -> bool {
     actions_doc()
         .get("actions")
         .and_then(Value::as_array)
-        .map(|list| list.iter().any(|a| a.get("name").and_then(Value::as_str) == Some(action)))
+        .map(|list| {
+            list.iter()
+                .any(|a| a.get("name").and_then(Value::as_str) == Some(action))
+        })
         .unwrap_or(false)
 }
 
@@ -426,14 +469,22 @@ fn disabled_response() -> Response {
     )
 }
 
-async fn read_body_json(req: Request) -> Result<Value, Response> {
-    let bytes = to_bytes(req.into_body(), MAX_BODY)
-        .await
-        .map_err(|_| control::err(StatusCode::PAYLOAD_TOO_LARGE, "тело больше 10 MiB"))?;
+async fn read_body_json(req: Request) -> Result<Value, Box<Response>> {
+    let bytes = to_bytes(req.into_body(), MAX_BODY).await.map_err(|_| {
+        Box::new(control::err(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "тело больше 10 MiB",
+        ))
+    })?;
     if bytes.is_empty() {
         return Ok(Value::Null);
     }
-    serde_json::from_slice(&bytes).map_err(|e| control::err(StatusCode::BAD_REQUEST, &format!("тело не JSON: {e}")))
+    serde_json::from_slice(&bytes).map_err(|e| {
+        Box::new(control::err(
+            StatusCode::BAD_REQUEST,
+            &format!("тело не JSON: {e}"),
+        ))
+    })
 }
 
 async fn state_collection_handler(req: Request) -> Response {
@@ -442,16 +493,24 @@ async fn state_collection_handler(req: Request) -> Response {
         return control::json_response(StatusCode::OK, &full_state());
     }
     if method != Method::POST && method != Method::PATCH {
-        return control::err(StatusCode::METHOD_NOT_ALLOWED, "для /debug/state доступны GET, POST и PATCH");
+        return control::err(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "для /debug/state доступны GET, POST и PATCH",
+        );
     }
     let merge = method == Method::PATCH;
     let body = match read_body_json(req).await {
         Ok(b) => b,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let path = match body.get("path").and_then(Value::as_str) {
         Some(p) => p.to_string(),
-        None => return control::err(StatusCode::BAD_REQUEST, r#"нужно {"path": "...", "value": ...}"#),
+        None => {
+            return control::err(
+                StatusCode::BAD_REQUEST,
+                r#"нужно {"path": "...", "value": ...}"#,
+            )
+        }
     };
     let value = body.get("value").cloned().unwrap_or(Value::Null);
     match apply_write(&path, value, merge).await {
@@ -459,7 +518,9 @@ async fn state_collection_handler(req: Request) -> Response {
             StatusCode::OK,
             &json!({"ok": true, "status": "ok", "path": path, "result": info}),
         ),
-        Err((status, message)) => control::json_response(status, &json!({"ok": false, "error": message})),
+        Err((status, message)) => {
+            control::json_response(status, &json!({"ok": false, "error": message}))
+        }
     }
 }
 
@@ -468,16 +529,22 @@ async fn state_item_handler(Path(key): Path<String>, req: Request) -> Response {
     if method == Method::GET {
         return match path_get(&full_state(), &key) {
             Some(v) => control::json_response(StatusCode::OK, v),
-            None => control::err(StatusCode::NOT_FOUND, &format!("нет значения по пути «{key}»")),
+            None => control::err(
+                StatusCode::NOT_FOUND,
+                &format!("нет значения по пути «{key}»"),
+            ),
         };
     }
     if method != Method::POST && method != Method::PATCH {
-        return control::err(StatusCode::METHOD_NOT_ALLOWED, "для /debug/state/<путь> доступны GET, POST и PATCH");
+        return control::err(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "для /debug/state/<путь> доступны GET, POST и PATCH",
+        );
     }
     // Тело запроса = новое значение целиком; PATCH объединяет объекты поверх текущего.
     let body = match read_body_json(req).await {
         Ok(b) => b,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let merge = method == Method::PATCH;
     match apply_write(&key, body, merge).await {
@@ -485,7 +552,9 @@ async fn state_item_handler(Path(key): Path<String>, req: Request) -> Response {
             StatusCode::OK,
             &json!({"ok": true, "status": "ok", "path": key, "result": info}),
         ),
-        Err((status, message)) => control::json_response(status, &json!({"ok": false, "error": message})),
+        Err((status, message)) => {
+            control::json_response(status, &json!({"ok": false, "error": message}))
+        }
     }
 }
 
@@ -496,11 +565,18 @@ async fn actions_handler() -> Response {
 async fn dispatch_handler(req: Request) -> Response {
     let body = match read_body_json(req).await {
         Ok(b) => b,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
-    let action = body.get("action").and_then(Value::as_str).unwrap_or("").to_string();
+    let action = body
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     if action.is_empty() {
-        return control::err(StatusCode::BAD_REQUEST, r#"нужно {"action": "...", "payload": ...}"#);
+        return control::err(
+            StatusCode::BAD_REQUEST,
+            r#"нужно {"action": "...", "payload": ...}"#,
+        );
     }
     if !is_known_action(&action) {
         return control::json_response(
@@ -583,8 +659,7 @@ pub(crate) fn element_id(el: &Value) -> &str {
     el.get("id").and_then(Value::as_str).unwrap_or("")
 }
 
-/// --- Gate check for element actions ---
-
+// --- Gate check for element actions ---
 /// Причина отказа gate_check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateReject {
@@ -604,7 +679,10 @@ pub struct GateItem {
 /// Чистая проверка элемента по списку живых элементов.
 /// Возвращает элемент, если он есть, включен и видим; иначе — причину отказа.
 fn gate_check_elements(live: &[Value], id: &str) -> Result<GateItem, GateReject> {
-    let el = live.iter().find(|e| element_id(e) == id).ok_or(GateReject::NotFound)?;
+    let el = live
+        .iter()
+        .find(|e| element_id(e) == id)
+        .ok_or(GateReject::NotFound)?;
     let enabled = el.get("enabled").and_then(Value::as_bool).unwrap_or(true);
     let visible = el.get("visible").and_then(Value::as_bool).unwrap_or(true);
     if !enabled {
@@ -625,6 +703,36 @@ pub(crate) fn gate_check(id: &str) -> Result<GateItem, GateReject> {
     gate_check_elements(&live_elements(), id)
 }
 
+/// HTTP-ответ на отказ гейта; after_refresh — что карта уже обновлялась round-trip'ом.
+fn gate_err(id: &str, r: GateReject, after_refresh: bool) -> (StatusCode, String) {
+    let tail = if after_refresh {
+        " после обновления карты"
+    } else {
+        ""
+    };
+    match r {
+        GateReject::NotFound => (
+            StatusCode::NOT_FOUND,
+            format!("объект «{id}» не на экране{tail}; карта — GET /debug/broop"),
+        ),
+        GateReject::Disabled => (
+            StatusCode::FORBIDDEN,
+            format!("объект «{id}» отключен (disabled)"),
+        ),
+        GateReject::Invisible => (
+            StatusCode::FORBIDDEN,
+            format!("объект «{id}» невидим (invisible)"),
+        ),
+    }
+}
+
+/// Клик по объекту через UI-эхо: публикация ui_command и ожидание эха.
+async fn click_element(id: &str) -> Value {
+    let seq_before = ui_seq();
+    publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
+    wait_ui_echo(seq_before).await
+}
+
 /// Реестр oneshot-каналов для ожидания обновления карты элементов (round-trip).
 fn elements_wait_registry() -> &'static Mutex<HashMap<String, oneshot::Sender<()>>> {
     static R: OnceLock<Mutex<HashMap<String, oneshot::Sender<()>>>> = OnceLock::new();
@@ -635,7 +743,10 @@ fn elements_wait_registry() -> &'static Mutex<HashMap<String, oneshot::Sender<()
 /// сработает когда UI пришлёт POST /debug/elements (в elements_handler).
 pub(crate) fn register_elements_wait(id: &str) -> oneshot::Receiver<()> {
     let (tx, rx) = oneshot::channel();
-    elements_wait_registry().lock().unwrap().insert(id.to_string(), tx);
+    elements_wait_registry()
+        .lock()
+        .unwrap()
+        .insert(id.to_string(), tx);
     rx
 }
 
@@ -699,7 +810,10 @@ async fn broop_handler() -> Response {
                 if let Some(o) = merged.as_object_mut() {
                     // id — реальный из DOM (по нему кликаем), шаблон каталога
                     // остаётся в declared_as.
-                    o.insert("declared_as".into(), obj.get("id").cloned().unwrap_or(Value::Null));
+                    o.insert(
+                        "declared_as".into(),
+                        obj.get("id").cloned().unwrap_or(Value::Null),
+                    );
                     o.insert("id".into(), json!(element_id(el)));
                     o.insert("state".into(), el.clone());
                 }
@@ -710,9 +824,12 @@ async fn broop_handler() -> Response {
     let undeclared: Vec<&Value> = live
         .iter()
         .filter(|el| {
-            !catalog
-                .iter()
-                .any(|o| matches_catalog(o.get("id").and_then(Value::as_str).unwrap_or(""), element_id(el)))
+            !catalog.iter().any(|o| {
+                matches_catalog(
+                    o.get("id").and_then(Value::as_str).unwrap_or(""),
+                    element_id(el),
+                )
+            })
         })
         .collect();
     let unmarked = live_unmarked();
@@ -753,11 +870,17 @@ async fn broop_get_handler(Query(params): Query<HashMap<String, String>>) -> Res
         .iter()
         .find(|o| matches_catalog(o.get("id").and_then(Value::as_str).unwrap_or(""), id))
         .cloned();
-    control::json_response(StatusCode::OK, &json!({"ok": true, "declared": declared, "state": live_el}))
+    control::json_response(
+        StatusCode::OK,
+        &json!({"ok": true, "declared": declared, "state": live_el}),
+    )
 }
 
 /// Выполняет действие и возвращает (состояние до, состояние после, результат).
-pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, Result<Value, (StatusCode, String)>) {
+pub(crate) async fn run_action(
+    action: &str,
+    payload: Value,
+) -> (Value, Value, Result<Value, (StatusCode, String)>) {
     let before = full_state();
     let result: Result<Value, (StatusCode, String)> = match action {
         "ui.set" => {
@@ -767,7 +890,9 @@ pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, R
                 Err((StatusCode::BAD_REQUEST, "нужен path вида ui.<путь>".into()))
             } else {
                 let seq_before = ui_seq();
-                publish(json!({"type": "ui_command", "path": rest, "value": payload.get("value").cloned().unwrap_or(Value::Null)}));
+                publish(
+                    json!({"type": "ui_command", "path": rest, "value": payload.get("value").cloned().unwrap_or(Value::Null)}),
+                );
                 Ok(wait_ui_echo(seq_before).await)
             }
         }
@@ -779,7 +904,10 @@ pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, R
         "ui.click" => {
             let name = payload.get("name").and_then(Value::as_str).unwrap_or("");
             if name.is_empty() {
-                Err((StatusCode::BAD_REQUEST, "нужен payload {\"name\": \"<кнопка>\"}".into()))
+                Err((
+                    StatusCode::BAD_REQUEST,
+                    "нужен payload {\"name\": \"<кнопка>\"}".into(),
+                ))
             } else {
                 let seq_before = ui_seq();
                 publish(json!({"type": "ui_command", "path": "click", "value": name}));
@@ -796,17 +924,15 @@ pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, R
             } else {
                 // First gate_check attempt.
                 match gate_check(id) {
-                    Ok(_) => {
-                        let seq_before = ui_seq();
-                        publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
-                        Ok(wait_ui_echo(seq_before).await)
-                    }
+                    Ok(_) => Ok(click_element(id).await),
                     Err(GateReject::NotFound) => {
                         // Round-trip: ask UI to collect elements, wait for POST /debug/elements.
                         publish(json!({"type": "action", "action": "elements.collect"}));
                         let rx = register_elements_wait(id);
-                        let wait_result = tokio::time::timeout(Duration::from_millis(2000), rx).await;
-                        if wait_result.is_err() {
+                        if tokio::time::timeout(Duration::from_millis(2000), rx)
+                            .await
+                            .is_err()
+                        {
                             // Timeout - return NotFound with guidance.
                             Err((
                                 StatusCode::NOT_FOUND,
@@ -815,41 +941,22 @@ pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, R
                         } else {
                             // Retry gate_check once after round-trip.
                             match gate_check(id) {
-                                Ok(_) => {
-                                    let seq_before = ui_seq();
-                                    publish(json!({"type": "ui_command", "path": "element.click", "value": {"id": id}}));
-                                    Ok(wait_ui_echo(seq_before).await)
-                                }
-                                Err(GateReject::NotFound) => Err((
-                                    StatusCode::NOT_FOUND,
-                                    format!("объект «{id}» не на экране после обновления карты; карта — GET /debug/broop"),
-                                )),
-                                Err(GateReject::Disabled) => Err((
-                                    StatusCode::FORBIDDEN,
-                                    format!("объект «{id}» отключен (disabled)"),
-                                )),
-                                Err(GateReject::Invisible) => Err((
-                                    StatusCode::FORBIDDEN,
-                                    format!("объект «{id}» невидим (invisible)"),
-                                )),
+                                Ok(_) => Ok(click_element(id).await),
+                                Err(r) => Err(gate_err(id, r, true)),
                             }
                         }
                     }
-                    Err(GateReject::Disabled) => Err((
-                        StatusCode::FORBIDDEN,
-                        format!("объект «{id}» отключен (disabled)"),
-                    )),
-                    Err(GateReject::Invisible) => Err((
-                        StatusCode::FORBIDDEN,
-                        format!("объект «{id}» невидим (invisible)"),
-                    )),
+                    Err(r) => Err(gate_err(id, r, false)),
                 }
             }
         }
         "eval" => {
             let expr = payload.get("expr").and_then(Value::as_str).unwrap_or("");
             if expr.is_empty() {
-                Err((StatusCode::BAD_REQUEST, "нужен payload {\"expr\": \"<js>\"}".into()))
+                Err((
+                    StatusCode::BAD_REQUEST,
+                    "нужен payload {\"expr\": \"<js>\"}".into(),
+                ))
             } else {
                 let seq_before = ui_seq();
                 publish(json!({"type": "ui_command", "path": "eval", "value": {"expr": expr}}));
@@ -885,10 +992,17 @@ pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, R
         }
         "logs.clear" => {
             let removed = clear_action_log();
-            control::log_action("logs", "clear", json!({"removed": removed, "via": "debug_api"}));
+            control::log_action(
+                "logs",
+                "clear",
+                json!({"removed": removed, "via": "debug_api"}),
+            );
             Ok(json!({"removed": removed}))
         }
-        other => Err((StatusCode::BAD_REQUEST, format!("неизвестное действие «{other}»"))),
+        other => Err((
+            StatusCode::BAD_REQUEST,
+            format!("неизвестное действие «{other}»"),
+        )),
     };
     let after = full_state();
     (before, after, result)
@@ -901,7 +1015,11 @@ async fn reset_handler(req: Request) -> Response {
     let seq_before = ui_seq();
     publish(json!({"type": "ui_reset"}));
     let ui = wait_ui_echo(seq_before).await;
-    control::log_action("debug", "reset", json!({"logs_removed": logs_removed, "via": "debug_api"}));
+    control::log_action(
+        "debug",
+        "reset",
+        json!({"logs_removed": logs_removed, "via": "debug_api"}),
+    );
     control::json_response(
         StatusCode::OK,
         &json!({"ok": true, "traffic": "cleared", "logs_removed": logs_removed, "ui": ui}),
@@ -922,7 +1040,9 @@ async fn logs_handler(Query(q): Query<LogsQuery>) -> Response {
             .iter()
             .rev()
             .filter(|e| {
-                q.area.as_ref().map_or(true, |a| e.get("area").and_then(Value::as_str) == Some(a.as_str()))
+                q.area
+                    .as_ref()
+                    .is_none_or(|a| e.get("area").and_then(Value::as_str) == Some(a.as_str()))
             })
             .take(limit)
             .cloned()
@@ -945,7 +1065,7 @@ async fn openapi_handler() -> Response {
 }
 
 async fn ws_handler(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(|socket| handle_socket(socket))
+    ws.on_upgrade(handle_socket)
 }
 
 async fn handle_socket(mut socket: WebSocket) {
@@ -962,14 +1082,13 @@ async fn handle_socket(mut socket: WebSocket) {
     }
     loop {
         tokio::select! {
-            received = rx.recv() => match received {
-                Ok(event) => {
-                    if socket.send(Message::Text(event.to_string())).await.is_err() {
-                        break;
-                    }
+            received = rx.recv() => if let Ok(event) = received {
+                if socket.send(Message::Text(event.to_string())).await.is_err() {
+                    break;
                 }
-                Err(_) => {} // Lagged: пропустили отставшие события, идём дальше.
-            },
+            }
+            // Err(Lagged): пропустили отставшие события, идём дальше.
+            ,
             message = socket.recv() => match message {
                 Some(Ok(Message::Close(_))) | None => break,
                 _ => {} // входящие сообщения клиента в v1 не используются
@@ -991,9 +1110,18 @@ async fn handle_socket(mut socket: WebSocket) {
 async fn wait_handler(Json(body): Json<Value>) -> Response {
     let predicate = match body.get("predicate").cloned() {
         Some(p) => p,
-        None => return control::err(StatusCode::BAD_REQUEST, r#"нужно {"predicate": {...}, "timeout_ms"?: 5000}"#),
+        None => {
+            return control::err(
+                StatusCode::BAD_REQUEST,
+                r#"нужно {"predicate": {...}, "timeout_ms"?: 5000}"#,
+            )
+        }
     };
-    let timeout_ms = body.get("timeout_ms").and_then(Value::as_u64).unwrap_or(5000).clamp(1, 60000);
+    let timeout_ms = body
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(5000)
+        .clamp(1, 60000);
     let out = wait_for_predicate(&predicate, timeout_ms).await;
     control::json_response(StatusCode::OK, &out)
 }
@@ -1036,8 +1164,13 @@ pub(crate) async fn wait_for_predicate(predicate: &Value, timeout_ms: u64) -> Va
 /// Активировать окно (показать/восстановить/сфокусировать).
 async fn window_activate_handler() -> Response {
     match window_activate().await {
-        Ok(()) => control::json_response(StatusCode::OK, &json!({"ok": true, "status": "activated"})),
-        Err(e) => control::json_response(StatusCode::SERVICE_UNAVAILABLE, &json!({"ok": false, "error": e})),
+        Ok(()) => {
+            control::json_response(StatusCode::OK, &json!({"ok": true, "status": "activated"}))
+        }
+        Err(e) => control::json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &json!({"ok": false, "error": e}),
+        ),
     }
 }
 
@@ -1056,7 +1189,10 @@ pub(crate) fn mcp_router<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route("/debug/logs", get(logs_handler))
         .route("/debug/ui-state", post(ui_state_handler))
         .route("/debug/elements", post(elements_handler))
-        .route("/debug/eval-out", post(eval_out_handler).get(eval_get_handler))
+        .route(
+            "/debug/eval-out",
+            post(eval_out_handler).get(eval_get_handler),
+        )
         .route("/debug/broop", get(broop_handler))
         .route("/debug/broop/get", get(broop_get_handler))
         .route("/debug/stream", get(ws_handler))

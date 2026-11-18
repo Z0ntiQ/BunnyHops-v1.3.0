@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use wasm_bindgen::JsCast;
 use web_sys::{
     Document, Event, EventInit, HtmlElement, HtmlInputElement, HtmlSelectElement,
-    HtmlTextAreaElement, MouseEvent, MouseEventInit,
+    HtmlTextAreaElement,
 };
 
 /// Найти документ (wasm живёт в окне браузера).
@@ -122,9 +122,7 @@ pub fn collect() -> Vec<Value> {
 /// Интерактивные элементы без `data-bh`: гейт полноты разметки.
 /// Элемент внутри уже размеченного родителя не считается — его покрывает id родителя.
 pub fn unmarked() -> Vec<Value> {
-    let nodes = match doc()
-        .query_selector_all("button,input,select,textarea,a,[role=button]")
-    {
+    let nodes = match doc().query_selector_all("button,input,select,textarea,a,[role=button]") {
         Ok(n) => n,
         Err(_) => return Vec::new(),
     };
@@ -150,11 +148,6 @@ pub fn unmarked() -> Vec<Value> {
         }));
     }
     out
-}
-
-/// Дескриптор одного элемента по id (для точечной проверки).
-pub fn query(id: &str) -> Option<Value> {
-    find(id).map(|el| describe(&el))
 }
 
 /// Настоящий DOM-клик по элементу: событие проходит весь путь обработчиков UI.
@@ -198,19 +191,24 @@ pub fn set_value(id: &str, value: &Value) -> bool {
         if input.type_() == "checkbox" {
             input.set_checked(value.as_bool().unwrap_or(false));
         } else {
-            input.set_value(&value.as_str().map(String::from).unwrap_or_else(|| value.to_string()));
+            input.set_value(
+                &value
+                    .as_str()
+                    .map(String::from)
+                    .unwrap_or_else(|| value.to_string()),
+            );
         }
         dispatch(&el, "input");
         dispatch(&el, "change");
         return true;
     }
     if let Some(area) = el.dyn_ref::<HtmlTextAreaElement>() {
-        area.set_value(&value.as_str().unwrap_or(""));
+        area.set_value(value.as_str().unwrap_or(""));
         dispatch(&el, "input");
         return true;
     }
     if let Some(select) = el.dyn_ref::<HtmlSelectElement>() {
-        select.set_value(&value.as_str().unwrap_or(""));
+        select.set_value(value.as_str().unwrap_or(""));
         dispatch(&el, "change");
         return true;
     }

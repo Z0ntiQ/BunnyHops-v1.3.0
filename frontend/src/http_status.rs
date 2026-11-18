@@ -116,12 +116,3 @@ pub(crate) fn status_label(code: u64) -> String {
         _ => code.to_string(),
     }
 }
-
-/// Только название статуса, без номера: «OK» / «Not Found». Номер живёт в поле
-/// Status — на экране он один раз (правило «экономика места», 18.11.2026).
-pub(crate) fn status_name(code: u64) -> String {
-    match status_phrase(code as u16) {
-        Some(p) if code <= u16::MAX as u64 => p.to_string(),
-        _ => code.to_string(),
-    }
-}

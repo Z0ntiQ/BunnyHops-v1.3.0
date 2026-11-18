@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """Functional API matrix for BunnyProx mock gateway."""
-import json, os, socket, sys, threading, time, http.server, urllib.request, urllib.error
+import http.server
+import json
+import os
+import socket
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
 
 ECHO_PORT = 3198
 LISTEN_PORT = 3199

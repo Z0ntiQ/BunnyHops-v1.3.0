@@ -18,7 +18,13 @@ struct Spring {
 
 impl Spring {
     fn new(x: f64) -> Self {
-        Spring { x, v: 0.0, t: x, k: 620.0, c: 40.0 }
+        Spring {
+            x,
+            v: 0.0,
+            t: x,
+            k: 620.0,
+            c: 40.0,
+        }
     }
     fn step(&mut self, dt: f64) {
         let a = -self.k * (self.x - self.t) - self.c * self.v;
@@ -69,7 +75,10 @@ pub fn req_tab_index(t: &str, has_body: bool) -> Option<usize> {
 
 fn track_el(id: &str) -> Option<(web_sys::Element, web_sys::HtmlElement)> {
     let doc = web_sys::window()?.document()?;
-    let track = doc.get_element_by_id(id)?.dyn_into::<web_sys::Element>().ok()?;
+    let track = doc
+        .get_element_by_id(id)?
+        .dyn_into::<web_sys::Element>()
+        .ok()?;
     let pill = track
         .query_selector(".tab-pill")
         .ok()?
@@ -81,7 +90,10 @@ fn track_el(id: &str) -> Option<(web_sys::Element, web_sys::HtmlElement)> {
 /// offsetLeft кнопки считается от него.
 fn measure(track: &web_sys::Element, idx: usize) -> Option<(f64, f64)> {
     let btns = track.query_selector_all("button.tab").ok()?;
-    let el = btns.item(idx as u32)?.dyn_into::<web_sys::HtmlElement>().ok()?;
+    let el = btns
+        .item(idx as u32)?
+        .dyn_into::<web_sys::HtmlElement>()
+        .ok()?;
     let l = el.offset_left() as f64;
     Some((l, l + el.offset_width() as f64))
 }
@@ -101,7 +113,9 @@ fn tick(id: &str, now: f64) -> bool {
     };
     PILLS.with(|pc| {
         let mut b = pc.borrow_mut();
-        let Some(pl) = b.get_mut(id) else { return false };
+        let Some(pl) = b.get_mut(id) else {
+            return false;
+        };
         if let Some(idx) = pl.idx {
             if let Some((l, r)) = measure(&track, idx) {
                 pl.a.t = l;
@@ -141,15 +155,17 @@ fn schedule(id: &str) {
 /// Разбудить пилюлю после изменения разметки трека (счётники бейджей, показ Body).
 fn wake(id: &str) {
     let start = PILLS.with(|pc| {
-        pc.borrow_mut().get_mut(id).map(|pl| {
-            if pl.running {
-                false
-            } else {
-                pl.running = true;
-                true
-            }
-        })
-        .unwrap_or(false)
+        pc.borrow_mut()
+            .get_mut(id)
+            .map(|pl| {
+                if pl.running {
+                    false
+                } else {
+                    pl.running = true;
+                    true
+                }
+            })
+            .unwrap_or(false)
     });
     if start {
         schedule(id);
@@ -164,7 +180,8 @@ fn ensure_reactive(id: &str, track: &web_sys::Element) {
         let cb = Closure::wrap(Box::new(move |_: JsValue| {
             wake(&id2);
         }) as Box<dyn FnMut(JsValue)>);
-        if let Ok(obs) = web_sys::MutationObserver::new(cb.as_ref().unchecked_ref::<js_sys::Function>())
+        if let Ok(obs) =
+            web_sys::MutationObserver::new(cb.as_ref().unchecked_ref::<js_sys::Function>())
         {
             std::mem::forget(cb);
             let init = web_sys::MutationObserverInit::new();
@@ -179,8 +196,12 @@ fn ensure_reactive(id: &str, track: &web_sys::Element) {
     if !RESIZE_ON.with(|r| r.get()) {
         RESIZE_ON.with(|r| r.set(true));
         let cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
-            let ids: Vec<(String, Option<usize>)> =
-                PILLS.with(|pc| pc.borrow().iter().map(|(k, p)| (k.clone(), p.idx)).collect());
+            let ids: Vec<(String, Option<usize>)> = PILLS.with(|pc| {
+                pc.borrow()
+                    .iter()
+                    .map(|(k, p)| (k.clone(), p.idx))
+                    .collect()
+            });
             for (id, idx) in ids {
                 move_pill(&id, idx, false);
             }
@@ -205,7 +226,9 @@ pub fn drop_pill(id: &str) {
 /// Поставить пилюлю под кнопку idx трека `id`; None — сжать в точку (вкладка скрыта).
 /// animate=false — мгновенно; при первом появлении трека всегда мгновенно.
 pub fn move_pill(id: &str, idx: Option<usize>, animate: bool) {
-    let Some((track, pill)) = track_el(id) else { return };
+    let Some((track, pill)) = track_el(id) else {
+        return;
+    };
     let target = idx.and_then(|i| measure(&track, i));
     let new_entry = !PILLS.with(|pc| pc.borrow().contains_key(id));
     if new_entry {
@@ -215,7 +238,13 @@ pub fn move_pill(id: &str, idx: Option<usize>, animate: bool) {
         let mut b = pc.borrow_mut();
         let pl = b.entry(id.to_string()).or_insert_with(|| {
             let (l, r) = target.unwrap_or((0.0, 0.0));
-            Pill { a: Spring::new(l), b: Spring::new(r), idx, running: false, prev: 0.0 }
+            Pill {
+                a: Spring::new(l),
+                b: Spring::new(r),
+                idx,
+                running: false,
+                prev: 0.0,
+            }
         });
         let prev_idx = pl.idx;
         pl.idx = idx;

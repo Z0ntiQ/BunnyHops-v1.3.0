@@ -122,8 +122,8 @@ fn cdp_candidates() -> Vec<u16> {
         }
     }
     if let Ok(home) = std::env::var("HOME") {
-        let f = std::path::Path::new(&home)
-            .join(".hermes/browser-profile/chrome/DevToolsActivePort");
+        let f =
+            std::path::Path::new(&home).join(".hermes/browser-profile/chrome/DevToolsActivePort");
         if let Ok(s) = std::fs::read_to_string(&f) {
             if let Some(p) = s.lines().next().and_then(|l| l.trim().parse::<u16>().ok()) {
                 ports.push(p);
@@ -206,31 +206,40 @@ pub async fn screenshot_handler(Query(q): Query<HashMap<String, String>>) -> Res
                         .map(|u| u.contains(&target))
                         .unwrap_or(false)
             }) {
-                ws_url = t.get("webSocketDebuggerUrl").and_then(Value::as_str).map(String::from);
+                ws_url = t
+                    .get("webSocketDebuggerUrl")
+                    .and_then(Value::as_str)
+                    .map(String::from);
                 if ws_url.is_some() {
                     break;
                 }
             }
         }
-        let ws_url = ws_url.ok_or("вкладка Bunny Hops не найдена (открой http://localhost:3000)")?;
-        let (ws, _) = connect_async(&ws_url).await.map_err(|e| format!("ws: {e}"))?;
+        let ws_url =
+            ws_url.ok_or("вкладка Bunny Hops не найдена (открой http://localhost:3000)")?;
+        let (ws, _) = connect_async(&ws_url)
+            .await
+            .map_err(|e| format!("ws: {e}"))?;
         let mut cdp = Cdp { ws, id: 0 };
         cdp.send("Page.enable", json!({})).await?;
         cdp.send("Page.bringToFront", json!({})).await?;
 
         // 2. Геометрия и активный таб.
         let geo = cdp.eval_json(GEOMETRY_JS).await?;
-        let left = rect_from(geo.get("left").ok_or("no left pane")?)
-            .ok_or("left pane not visible")?;
-        let right = rect_from(geo.get("right").ok_or("no right pane")?)
-            .ok_or("right pane not visible")?;
+        let left =
+            rect_from(geo.get("left").ok_or("no left pane")?).ok_or("left pane not visible")?;
+        let right =
+            rect_from(geo.get("right").ok_or("no right pane")?).ok_or("right pane not visible")?;
         let urlbar = geo.get("urlbar").and_then(rect_from);
         let tabs: Vec<Value> = geo
             .get("tabs")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let restore = geo.get("activeTab").and_then(Value::as_str).map(String::from);
+        let restore = geo
+            .get("activeTab")
+            .and_then(Value::as_str)
+            .map(String::from);
 
         let click_tab = |_cdp: &mut Cdp, name: &str| -> Option<(f64, f64)> {
             find_tab(&tabs, name).map(|t| {
@@ -276,27 +285,16 @@ pub async fn screenshot_handler(Query(q): Query<HashMap<String, String>>) -> Res
         stitch(&shots)
     };
     match tokio::time::timeout(std::time::Duration::from_secs(25), run).await {
-        Ok(Ok(png)) => (
-            StatusCode::OK,
-            [("content-type", "image/png")],
-            png,
-        )
-            .into_response(),
+        Ok(Ok(png)) => (StatusCode::OK, [("content-type", "image/png")], png).into_response(),
         Ok(Err(e)) => (
             StatusCode::BAD_GATEWAY,
-            [(
-                "content-type",
-                "application/json; charset=utf-8",
-            )],
+            [("content-type", "application/json; charset=utf-8")],
             json!({"error": e}).to_string(),
         )
             .into_response(),
         Err(_) => (
             StatusCode::GATEWAY_TIMEOUT,
-            [(
-                "content-type",
-                "application/json; charset=utf-8",
-            )],
+            [("content-type", "application/json; charset=utf-8")],
             json!({"error": "cdp timeout"}).to_string(),
         )
             .into_response(),

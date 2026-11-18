@@ -1,9 +1,7 @@
 //! method_select: вынесено из app.rs (атомарные модули, правило пользователя 13.11.2026).
 
-use leptos::prelude::*;
 use crate::ui::METHODS;
-
-
+use leptos::prelude::*;
 
 /* ---------- цветной выпадающий список методов — стиль Spring Dropdown ---------- */
 /// Цвет точки-маркера метода (тёмный фон, яркие тона как в референсе).
@@ -24,7 +22,7 @@ pub fn MethodSelect(
     get_method: Callback<(), String>,
     set_method: Callback<String>,
 ) -> impl IntoView {
-    let open = create_rw_signal(false);
+    let open = RwSignal::new(false);
     let current = move || get_method.run(());
     let cur_color = move || method_dot_color(&current());
     view! {

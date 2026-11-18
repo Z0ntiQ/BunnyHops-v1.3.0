@@ -1,8 +1,11 @@
 //! doStream — выполнение запроса через /proxy со стримингом. 1:1 с App.jsx.
 
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::{spawn_local, JsFuture};
-use web_sys::{AbortSignal, Blob, BlobPropertyBag, ReadableStreamDefaultReader, Request, RequestInit, Response, TextDecoder, TextDecodeOptions};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{
+    AbortSignal, Blob, BlobPropertyBag, ReadableStreamDefaultReader, Request, RequestInit,
+    Response, TextDecodeOptions, TextDecoder,
+};
 
 use crate::ui::js_now;
 
@@ -15,9 +18,6 @@ pub struct RespUpdate {
     pub final_url: String,
     pub is_textual: bool,
 }
-
-/// Промежуточные порции тела для отрисовки (аналог flush по rAF).
-pub type OnChunk = Box<dyn FnMut(u64, String)>;
 
 pub struct StreamOutcome {
     pub network_error: bool,
@@ -64,20 +64,33 @@ pub async fn do_stream(
             h.push((k.clone(), v.clone()));
         }
     }
-    let proxy_url = format!("/debug/proxy?url={}", crate::logic::js_encode_uri_component(target));
+    let proxy_url = format!(
+        "/debug/proxy?url={}",
+        crate::logic::js_encode_uri_component(target)
+    );
     let init = RequestInit::new();
     init.set_method(method);
     let hobj = js_sys::Object::new();
     let headers_json = serde_json::to_string(
-        &h.iter().map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone()))).collect::<serde_json::Map<_, _>>(),
+        &h.iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect::<serde_json::Map<_, _>>(),
     )
     .unwrap();
     // порядок ключей в JSON сохраняем вручную: serde_json::Map сортирует только с feature "preserve_order";
     // для контракта прокси порядок не значим.
-    js_sys::Reflect::set(&hobj, &JsValue::from_str("x-proxy-headers"), &JsValue::from_str(&headers_json))
-        .unwrap();
+    js_sys::Reflect::set(
+        &hobj,
+        &JsValue::from_str("x-proxy-headers"),
+        &JsValue::from_str(&headers_json),
+    )
+    .unwrap();
     // запросы из интерфейса не попадают в лог внешнего API
-    let _ = js_sys::Reflect::set(&hobj, &JsValue::from_str("x-hop-ui"), &JsValue::from_str("1"));
+    let _ = js_sys::Reflect::set(
+        &hobj,
+        &JsValue::from_str("x-hop-ui"),
+        &JsValue::from_str("1"),
+    );
     init.set_headers(&JsValue::from(hobj));
     if !body_text.trim().is_empty() && !matches!(method, "GET" | "HEAD") {
         init.set_body(&JsValue::from_str(body_text));
@@ -90,13 +103,20 @@ pub async fn do_stream(
 
     let proxy_err = resp.headers().get("x-proxy-error").unwrap_or(None);
     if let Some(_pe) = proxy_err {
-        let text = JsFuture::from(resp.text()?).await?.as_string().unwrap_or_default();
+        let text = JsFuture::from(resp.text()?)
+            .await?
+            .as_string()
+            .unwrap_or_default();
         return Ok(StreamOutcome {
             network_error: true,
             status: resp.status() as u16,
             time_ms: 0.0,
             bytes: 0,
-            text: if text.is_empty() { "Не удалось подключиться".to_string() } else { text },
+            text: if text.is_empty() {
+                "Не удалось подключиться".to_string()
+            } else {
+                text
+            },
             image_blob_url: None,
         });
     }
@@ -134,11 +154,8 @@ pub async fn do_stream(
     });
 
     // чтение потока
-    let reader: ReadableStreamDefaultReader = resp
-        .body()
-        .expect("stream body")
-        .get_reader()
-        .dyn_into()?;
+    let reader: ReadableStreamDefaultReader =
+        resp.body().expect("stream body").get_reader().dyn_into()?;
     let decoder = TextDecoder::new().unwrap();
     let opts = TextDecodeOptions::new();
     opts.set_stream(true);
@@ -155,12 +172,16 @@ pub async fn do_stream(
         if done {
             break;
         }
-        let value: js_sys::Uint8Array =
-            js_sys::Reflect::get(&res, &JsValue::from_str("value")).unwrap().dyn_into().unwrap();
+        let value: js_sys::Uint8Array = js_sys::Reflect::get(&res, &JsValue::from_str("value"))
+            .unwrap()
+            .dyn_into()
+            .unwrap();
         let len = value.length() as u64;
         if is_textual {
             let bytes_slice = value.to_vec();
-            let part = decoder.decode_with_u8_array_and_options(&bytes_slice, &opts).unwrap();
+            let part = decoder
+                .decode_with_u8_array_and_options(&bytes_slice, &opts)
+                .unwrap();
             text.push_str(&part);
         } else {
             binary_chunks.push(&JsValue::from(value));
@@ -172,19 +193,24 @@ pub async fn do_stream(
     if is_textual {
         // финальный decode()
         opts.set_stream(false);
-        let tail = decoder.decode_with_u8_array_and_options(&[], &opts).unwrap();
+        let tail = decoder
+            .decode_with_u8_array_and_options(&[], &opts)
+            .unwrap();
         text.push_str(&tail);
     }
 
     let time_ms = (js_now() - start).round();
     let mut image_blob_url = None;
-    if !is_textual
-        && content_type.starts_with("image/") {
-            let mut initb = BlobPropertyBag::new();
-            initb.type_(&if content_type.is_empty() { "application/octet-stream".to_string() } else { content_type.clone() });
-            let blob = Blob::new_with_u8_array_sequence_and_options(&binary_chunks, &initb).unwrap();
-            image_blob_url = Some(web_sys::Url::create_object_url_with_blob(&blob).unwrap());
-        }
+    if !is_textual && content_type.starts_with("image/") {
+        let initb = BlobPropertyBag::new();
+        initb.set_type(if content_type.is_empty() {
+            "application/octet-stream"
+        } else {
+            &content_type
+        });
+        let blob = Blob::new_with_u8_array_sequence_and_options(&binary_chunks, &initb).unwrap();
+        image_blob_url = Some(web_sys::Url::create_object_url_with_blob(&blob).unwrap());
+    }
 
     Ok(StreamOutcome {
         network_error: false,
@@ -194,8 +220,4 @@ pub async fn do_stream(
         text: if is_textual { text } else { String::new() },
         image_blob_url,
     })
-}
-
-pub fn spawn_local_task(f: impl std::future::Future<Output = ()> + 'static) {
-    spawn_local(f);
 }

@@ -63,8 +63,14 @@ fn is_skipped(name: &str) -> bool {
 /// Разрешает путь запроса внутри dist/ с защитой от выхода за root
 /// (аналог join+normalize+startsWith из server.js).
 fn resolve_static(root: &Path, raw_path: &str) -> Option<PathBuf> {
-    let decoded = percent_encoding::percent_decode_str(raw_path).decode_utf8_lossy().into_owned();
-    let clean = if decoded == "/" { "/index.html".to_string() } else { decoded };
+    let decoded = percent_encoding::percent_decode_str(raw_path)
+        .decode_utf8_lossy()
+        .into_owned();
+    let clean = if decoded == "/" {
+        "/index.html".to_string()
+    } else {
+        decoded
+    };
     let mut file = root.to_path_buf();
     for c in Path::new(&clean).components() {
         match c {
@@ -127,6 +133,34 @@ pub struct AppState {
     api_log: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
+/// Прокси-журнал одного вызова: API-лог (только внешние вызовы) + транспортный лог действий.
+// Поля — ровно содержимое одной записи журнала; дробить на struct-обёртку дороже, чем читать.
+#[allow(clippy::too_many_arguments)]
+fn log_proxy_call(
+    state: &AppState,
+    method: &Method,
+    target: &str,
+    supplied: &HashMap<String, serde_json::Value>,
+    body: &[u8],
+    status: u16,
+    from_ui: bool,
+    error: Option<String>,
+) {
+    if !from_ui {
+        log_api_call(state, method, target, supplied, body, status);
+    }
+    let mut entry = serde_json::json!({
+        "method": method.as_str(),
+        "url": target,
+        "status": status,
+        "from_ui": from_ui,
+    });
+    if let Some(e) = error {
+        entry["error"] = serde_json::Value::String(e);
+    }
+    control::log_action("request", "proxy", entry);
+}
+
 /// Вызовы /proxy из внешнего API (без заголовка x-hop-ui) складываем в лог
 /// для технической вкладки automation_rules.
 fn log_api_call(
@@ -137,7 +171,9 @@ fn log_api_call(
     body: &[u8],
     status: u16,
 ) {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let headers: Vec<serde_json::Value> = supplied
         .iter()
         .map(|(k, v)| {
@@ -185,10 +221,7 @@ async fn proxy_handler(
     req: Request,
 ) -> Response {
     let client = state.client.clone();
-    let target = req
-        .uri()
-        .query()
-        .and_then(|q| url_query_param(q, "url"));
+    let target = req.uri().query().and_then(|q| url_query_param(q, "url"));
 
     let builder = Response::builder()
         .header("Cache-Control", "no-store")
@@ -206,14 +239,17 @@ async fn proxy_handler(
     };
 
     // валидация URL до запроса: невалидный — это 400, а не «подключение не удалось»
-    if let Err(e) = reqwest::Url::parse(&target) {
-        return builder
-            .status(StatusCode::BAD_REQUEST)
-            .header("Content-Type", "text/plain; charset=utf-8")
-            .header("X-Proxy-Error", "invalid-url")
-            .body(Body::from(format!("INVALID_URL — {e}")))
-            .unwrap();
-    }
+    let parsed = match reqwest::Url::parse(&target) {
+        Ok(u) => u,
+        Err(e) => {
+            return builder
+                .status(StatusCode::BAD_REQUEST)
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .header("X-Proxy-Error", "invalid-url")
+                .body(Body::from(format!("INVALID_URL — {e}")))
+                .unwrap();
+        }
+    };
 
     let method = req.method().clone();
     let supplied: HashMap<String, serde_json::Value> = req
@@ -240,7 +276,7 @@ async fn proxy_handler(
     };
     let body_log = body_bytes.clone();
 
-    let mut rb = client.request(method.clone(), &target);
+    let mut rb = client.request(method.clone(), parsed.clone());
     for (k, v) in &supplied {
         let lk = k.to_ascii_lowercase();
         if HOP_BY_HOP.contains(&lk.as_str()) || lk == "content-length" {
@@ -259,16 +295,17 @@ async fn proxy_handler(
 
     match rb.send().await {
         Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
-            if !from_ui {
-                log_api_call(&state, &method, &target, &supplied, &body_log, status.as_u16());
-            }
-            control::log_action("request", "proxy", serde_json::json!({
-                "method": method.as_str(),
-                "url": &target,
-                "status": status.as_u16(),
-                "from_ui": from_ui,
-            }));
+            let status = resp.status();
+            log_proxy_call(
+                &state,
+                &method,
+                &target,
+                &supplied,
+                &body_log,
+                status.as_u16(),
+                from_ui,
+                None,
+            );
             let final_url = resp.url().to_string();
             let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::new();
             for (k, v) in resp.headers().iter() {
@@ -289,20 +326,17 @@ async fn proxy_handler(
         }
         Err(e) => {
             eprintln!("proxy error: {e:?}");
-            if !from_ui {
-                log_api_call(&state, &method, &target, &supplied, &body_log, 502);
-            }
-            control::log_action("request", "proxy", serde_json::json!({
-                "method": method.as_str(),
-                "url": &target,
-                "status": 502,
-                "from_ui": from_ui,
-                "error": format!("{e}"),
-            }));
-            let host = target
-                .parse::<reqwest::Url>()
-                .map(|u| u.host_str().unwrap_or(&target).to_string())
-                .unwrap_or_else(|_| target.clone());
+            log_proxy_call(
+                &state,
+                &method,
+                &target,
+                &supplied,
+                &body_log,
+                502,
+                from_ui,
+                Some(format!("{e}")),
+            );
+            let host = parsed.host_str().unwrap_or(&target).to_string();
             let (kind, verb) = if e.is_timeout() {
                 ("timeout", "превышен таймаут запроса к")
             } else if short_error(&e) == "ENOTFOUND" {
@@ -355,15 +389,15 @@ fn url_query_param(q: &str, key: &str) -> Option<String> {
     None
 }
 
-pub mod screenshot;
-pub mod eyes;
 pub mod control;
-pub mod mock_server;
-pub mod mock_random;
 pub mod debug_api;
+pub mod eyes;
+pub mod mock_random;
+pub mod mock_server;
 pub mod rpc_api;
-use screenshot::screenshot_handler;
+pub mod screenshot;
 use eyes::eyes_handler;
+use screenshot::screenshot_handler;
 
 /// Запускает сервер; возвращает занявший порт.
 /// `fixed_port: None` — порт всегда рандомизируется (ОС выдаёт свободный, правило пользователя 17.11.2026);
@@ -415,14 +449,9 @@ pub async fn run_server(
             let root = dist.clone();
             async move { serve_static_or_spa(&root, req).await }
         })
-        .with_state(AppState {
-            client,
-            api_log,
-        })
+        .with_state(AppState { client, api_log })
         // Транспортный журнал: ни один запрос к API не проходит незамеченным.
-        .layer(axum::middleware::from_fn(
-            control::api_access_middleware,
-        ));
+        .layer(axum::middleware::from_fn(control::api_access_middleware));
 
     // Порт: по умолчанию рандомизация на каждом старте; строгий bind только при явном PORT.
     // Bind только на loopback: /proxy — открытый прокси, наружу (LAN) торчать нечем (правило ревью 17.11.2026).
