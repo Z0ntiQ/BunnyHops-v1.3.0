@@ -578,7 +578,9 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
     let port = profile.listen_port;
     let name_clone = name.clone();
     // bind до ответа: 200 только если порт реально занят
-    let listener = match TcpListener::bind(("127.0.0.1", port)).await {
+    // 0.0.0.0 — mock доступен и с внешних адресов мака (VPN 10.40-контур зовёт его как 1С);
+    // 127.0.0.1-клиенты (preview, внутренние проверки) продолжают работать: 0.0.0.0 покрывает и localhost.
+    let listener = match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {
             let msg = format!("bind {port}: {e}");
