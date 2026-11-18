@@ -307,7 +307,7 @@ async fn handle_ui_click(_state: &AppState, params: Option<Value>) -> Result<Val
             Ok(result)
         }
         Err(debug_api::GateReject::NotFound) => {
-            debug_api::publish(json!({"action": "elements.collect"}));
+            debug_api::publish(json!({"type": "action", "action": "elements.collect"}));
             let rx = debug_api::register_elements_wait(id);
             let wait_result = tokio::time::timeout(std::time::Duration::from_millis(2000), rx).await;
             if wait_result.is_err() {

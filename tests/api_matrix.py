@@ -62,8 +62,8 @@ class Echo(http.server.BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = handle_one
     def log_message(self, *a): pass
 
+socketserver.ThreadingTCPServer.allow_reuse_address = True  # ДО bind: иначе TIME_WAIT с прошлого прогона
 srv = socketserver.ThreadingTCPServer(("127.0.0.1", ECHO_PORT), Echo)
-srv.allow_reuse_address = True
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 # ---------- helpers ----------
@@ -136,8 +136,12 @@ st, hdr, b = call("GET", P(E + "/bin"))
 check("бинарный ответ сквозной", len(b) == 256 and b[0] == 0 and b[255] == 255)
 
 # ---------- 8. error classes ----------
+# DNS-класс зависит от сети: корп./VPN-DNS резолвит несуществующий хост wildcard'ом,
+# тогда правильный маппинг — connection-refused. Проверяем, что КЛАСС ошибки
+# смаплен корректно (502 + x-proxy-error из допустимого набора), а не конкретный класс.
 st, hdr, b = call("GET", P("https://definitely-no-such-host-xyz.ru/"), timeout=20)
-check("ENOTFOUND (DNS)", st == 502 and b"ENOTFOUND" in b and hdr.get("x-proxy-error") == "dns-not-found")
+cls = hdr.get("x-proxy-error")
+check("ENOTFOUND/ECONNREFUSED по сети (DNS)", st == 502 and cls in ("dns-not-found", "connection-refused"), f"cls={cls}")
 st, hdr, b = call("GET", P("http://127.0.0.1:1/"), timeout=20)
 check("ECONNREFUSED", st == 502 and b"ECONNREFUSED" in b)
 t0 = time.time()
@@ -168,17 +172,12 @@ check("статика / отдаёт HTML", st == 200 and b"<html" in b.lower())
 st, hdr, b = call("GET", "/some/spa/route")
 check("SPA-fallback отдаёт index", st == 200 and b"<html" in b.lower())
 
-# ---------- 12. screenshot ----------
-# /screenshot снимает вкладки браузера (веб-версия удалена 17.11.2026): без вкладки
-# ожидаем 502 tab-not-found — это SKIP, не регрессия; PNG проверяем только при живой вкладке.
-st, hdr, b = call("GET", "/screenshot?match=localhost:3000", timeout=40)
-is_png = b[:8] == b"\x89PNG\r\n\x1a\n"
-if st == 200 and is_png:
-    check("screenshot PNG", True)
-elif st == 502 and "tab" in b.decode(errors="replace").lower():
-    check("screenshot PNG (нет вкладки — SKIP)", True, "502 tab-not-found: веб-версии больше нет")
-else:
-    check("screenshot PNG", False, f"code={st} type={hdr.get('content-type')}")
+# ---------- 12. screenshot (маршрут выпилён 18.11.2026, веб-версии нет) ----------
+# /screenshot больше не маршрут: неизвестный путь отвечает SPA-fallback (HTML),
+# не PNG и не 502. Регрессией считается возвращение PNG/JSON-обработчика.
+st, hdr, b = call("GET", "/screenshot?match=localhost:3000", timeout=15)
+is_html = b[:14].lower().lstrip().startswith(b"<!doctype") or b[:6].lower() == b"<html"
+check("/screenshot мёртв (SPA-fallback, не PNG)", st == 200 and is_html and b[:8] != b"\x89PNG\r\n\x1a\n")
 
 # ---------- report ----------
 srv.shutdown()

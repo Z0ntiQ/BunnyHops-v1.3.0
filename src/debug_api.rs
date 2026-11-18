@@ -803,7 +803,7 @@ pub(crate) async fn run_action(action: &str, payload: Value) -> (Value, Value, R
                     }
                     Err(GateReject::NotFound) => {
                         // Round-trip: ask UI to collect elements, wait for POST /debug/elements.
-                        publish(json!({"action": "elements.collect"}));
+                        publish(json!({"type": "action", "action": "elements.collect"}));
                         let rx = register_elements_wait(id);
                         let wait_result = tokio::time::timeout(Duration::from_millis(2000), rx).await;
                         if wait_result.is_err() {
@@ -1021,7 +1021,7 @@ pub(crate) async fn wait_for_predicate(predicate: &Value, timeout_ms: u64) -> Va
         // Round-trip trigger: ask UI to collect elements, but not more than once per 500ms
         let now = Instant::now();
         if now.duration_since(last_round_trip) >= Duration::from_millis(500) {
-            publish(json!({"action": "elements.collect"}));
+            publish(json!({"type": "action", "action": "elements.collect"}));
             last_round_trip = now;
         }
 
