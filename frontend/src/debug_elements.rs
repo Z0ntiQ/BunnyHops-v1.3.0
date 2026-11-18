@@ -40,7 +40,9 @@ fn short_text(el: &HtmlElement) -> String {
     }
     t = t.split_whitespace().collect::<Vec<_>>().join(" ");
     if t.len() > 60 {
-        t.truncate(60);
+        // truncate(60) паникует в середине многобайтного символа (кириллица):
+        // режем по границе символа, иначе вся задача пуша карты тихо умирает.
+        t.truncate(t.floor_char_boundary(60));
         t.push('…');
     }
     t
