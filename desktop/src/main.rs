@@ -39,7 +39,7 @@ fn resolve_dist(app: &tauri::App) -> PathBuf {
 
 fn main() {
     // Создаём oneshot-канал для активации окна (показать/восстановить/сфокусировать).
-    let (window_activate_tx, mut window_activate_rx) = tokio::sync::oneshot::channel::<()>();
+    let (window_activate_tx, window_activate_rx) = tokio::sync::oneshot::channel::<()>();
 
     tauri::Builder::default()
         // Обещание баннера: закрытие окна останавливает сервер и процесс
