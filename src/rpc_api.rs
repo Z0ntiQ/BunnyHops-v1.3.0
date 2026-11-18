@@ -22,7 +22,11 @@ const MAX_BODY: usize = 10 * 1024 * 1024;
 /// Путь lock-файла: ~/.config/bunny-hops/rpc.json. Внешний MCP-клиент читает
 /// его перед каждым вызовом и проверяет живость pid (os.kill(pid, 0)).
 pub fn lock_file_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    // Windows: HOME не существует (запуск через Планировщик задач), нужен USERPROFILE;
+    // иначе путь уходит в CWD и lock не пишется (инцидент 18.11.2026, TB49).
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
     std::path::PathBuf::from(home).join(".config/bunny-hops/rpc.json")
 }
 
