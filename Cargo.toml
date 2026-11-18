@@ -1,6 +1,6 @@
 [package]
 name = "bunny-hops-server"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Hop Lite на Rust: 1:1 порт server.js + proxy-middleware.js (статика SPA + стриминговый прокси против CORS)."
 
