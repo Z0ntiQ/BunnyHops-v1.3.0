@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 LOCK_FILE = Path.home() / ".config" / "bunny-hops" / "rpc.json"
 
@@ -112,7 +112,7 @@ def _rpc(method: str, params: dict[str, Any] | None = None, rpc_id: int = 1) -> 
     return data.get("result")
 
 
-mcp = FastMCP("broop")
+mcp = MCPServer("broop")
 
 
 @mcp.tool()
