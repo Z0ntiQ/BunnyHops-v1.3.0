@@ -4,3 +4,6 @@ frontend/dist/
 node_modules/
 *.log
 .DS_Store
+# Python: окружения и кэш — не в историю
+.venv/
+__pycache__/
