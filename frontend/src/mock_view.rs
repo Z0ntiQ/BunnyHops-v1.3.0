@@ -415,13 +415,27 @@ pub fn ProxyView() -> impl IntoView {
 
     let start_profile = move |name: String| {
         spawn_local(async move {
+            let refresh = name.clone();
             let body = json!({"name": name});
             match fetch_json_post("/debug/mock/start", &body).await {
                 Ok(v) => {
                     let port = v.get("port").and_then(|x| x.as_u64()).unwrap_or(0);
-                    status_msg.set(format!("Запущен на порту {}", port));
+                    let auto = v.get("auto").and_then(|x| x.as_bool()).unwrap_or(false);
+                    let requested = v.get("requested").and_then(|x| x.as_u64()).unwrap_or(0);
+                    // авто-выдачу говорим прямо: профиль всегда поднимает
+                    // независимый канал, пользователь должен видеть, что
+                    // настроенный порт занят и канал другой
+                    status_msg.set(if auto {
+                        format!(
+                            "Запущен на порту {port}: настроенный {requested} занят, порт выдан автоматически"
+                        )
+                    } else {
+                        format!("Запущен на порту {}", port)
+                    });
                     status_err.set(false);
                     load_profiles();
+                    // карточка обновляется сразу: в ней фактический порт канала
+                    load_profile(refresh);
                 }
                 Err(e) => {
                     status_msg.set(e);
@@ -433,12 +447,15 @@ pub fn ProxyView() -> impl IntoView {
 
     let stop_profile = move |name: String| {
         spawn_local(async move {
+            let refresh = name.clone();
             let body = json!({"name": name});
             match fetch_json_post("/debug/mock/stop", &body).await {
                 Ok(_) => {
                     status_msg.set("Остановлен".into());
                     status_err.set(false);
                     load_profiles();
+                    // подсказка об авто-выданном порте в карточке гаснет сразу
+                    load_profile(refresh);
                 }
                 Err(e) => {
                     status_msg.set(e);
@@ -885,6 +902,21 @@ pub fn ProxyView() -> impl IntoView {
                         <input data-bh="mock.listen_port" class="px-input" type="number" min="1" max="65535"
                             prop:value=move || profile_data.get().get("listen_port").and_then(|x| x.as_u64()).unwrap_or(0).to_string()
                             on:input=on_port_change />
+                        <Show when=move || {
+                            let d = profile_data.get();
+                            let a = d.get("actual_port").and_then(|x| x.as_u64()).unwrap_or(0);
+                            let c = d.get("listen_port").and_then(|x| x.as_u64()).unwrap_or(0);
+                            a != 0 && a != c
+                        }>
+                            <div class="px-help">
+                                {move || {
+                                    let d = profile_data.get();
+                                    let a = d.get("actual_port").and_then(|x| x.as_u64()).unwrap_or(0);
+                                    let c = d.get("listen_port").and_then(|x| x.as_u64()).unwrap_or(0);
+                                    format!("Профиль запущен на авто-выданном порте {a}: настроенный {c} занят другим каналом")
+                                }}
+                            </div>
+                        </Show>
                     </div>
                     <div class="px-field">
                         <label class="px-label">"Upstream (опционально)"</label>

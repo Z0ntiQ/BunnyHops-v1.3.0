@@ -32,13 +32,26 @@ const HOP_BY_HOP: &[&str] = &[
     "expect",
 ];
 
-static RUNNING_SERVERS: OnceLock<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>> =
-    OnceLock::new();
+/// Запущенный mock: handle задачи + ФАКТИЧЕСКИ занятый порт. Профиль всегда
+/// поднимает независимый канал: если настроенный порт занят чужим процессом или
+/// другим профилем, старт выдаёт эфемерный порт (пользователь, 20.11.2026);
+/// кто уже занял порт — тот хозяин, опоздавший уходит на авто-выданный.
+struct RunningServer {
+    handle: tokio::task::JoinHandle<()>,
+    port: u16,
+}
+
+static RUNNING_SERVERS: OnceLock<Mutex<HashMap<String, RunningServer>>> = OnceLock::new();
 static TRAFFIC_STORE: OnceLock<Mutex<HashMap<String, VecDeque<TrafficEntry>>>> = OnceLock::new();
 static CYCLE_COUNTERS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
 
-fn running_servers() -> &'static Mutex<HashMap<String, tokio::task::JoinHandle<()>>> {
+fn running_servers() -> &'static Mutex<HashMap<String, RunningServer>> {
     RUNNING_SERVERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Фактический порт запущенного профиля (None если не запущен).
+fn running_port(name: &str) -> Option<u16> {
+    running_servers().lock().unwrap().get(name).map(|s| s.port)
 }
 
 /// Снимок состояния mock-движка для control-плоскости (/api/status).
@@ -47,11 +60,11 @@ pub fn control_snapshot() -> serde_json::Value {
         .lock()
         .unwrap()
         .iter()
-        .map(|(name, handle)| {
+        .map(|(name, srv)| {
             serde_json::json!({
                 "name": name,
-                "running": !handle.is_finished(),
-                "port": load_profile(name).map(|p| p.listen_port).unwrap_or(0),
+                "running": !srv.handle.is_finished(),
+                "port": srv.port,
             })
         })
         .collect();
@@ -244,7 +257,15 @@ fn list_profiles() -> Result<Vec<ProfileSummary>, String> {
         if path.extension().and_then(|s| s.to_str()) == Some("json") {
             if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                 if let Ok(profile) = load_profile(name) {
-                    let running = running_servers().lock().unwrap().contains_key(name);
+                    let servers = running_servers().lock().unwrap();
+                    let running = servers.contains_key(name);
+                    // фактический порт показываем только когда он отличается от
+                    // настроенного (авто-выдача): обычный случай список не шумит
+                    let actual_port = servers
+                        .get(name)
+                        .map(|s| s.port)
+                        .filter(|p| *p != profile.listen_port);
+                    drop(servers);
                     // у профилей, созданных до появления поля, историей считается
                     // mtime файла
                     let created_at = if profile.created_at > 0.0 {
@@ -265,6 +286,7 @@ fn list_profiles() -> Result<Vec<ProfileSummary>, String> {
                         running,
                         rules: profile.rules.len(),
                         created_at,
+                        actual_port,
                     });
                 }
             }
@@ -307,6 +329,10 @@ struct ProfileSummary {
     running: bool,
     rules: usize,
     created_at: f64,
+    /// Фактический занятый порт запущенного профиля; отсутствует, если порт
+    /// совпадает с настроенным или профиль не запущен.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual_port: Option<u16>,
 }
 
 fn record_traffic(name: &str, entry: TrafficEntry) {
@@ -541,7 +567,15 @@ async fn profile_get_handler(Query(q): Query<NameQuery>) -> Response {
         return json_error("name required", StatusCode::BAD_REQUEST);
     };
     match load_profile(&name) {
-        Ok(p) => Json(serde_json::to_value(p).unwrap()).into_response(),
+        Ok(p) => {
+            let mut v = serde_json::to_value(p).unwrap();
+            // карточка профиля обязана показывать фактический канал: если старт
+            // ушёл на авто-выданный порт, пользователь видит это в редакторе
+            if let Some(port) = running_port(&name) {
+                v["actual_port"] = serde_json::json!(port);
+            }
+            Json(v).into_response()
+        }
         Err(_) => json_error("not found", StatusCode::NOT_FOUND),
     }
 }
@@ -596,8 +630,9 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
         Ok(p) => p,
         Err(_) => return json_error("profile not found", StatusCode::BAD_REQUEST),
     };
-    if running_servers().lock().unwrap().contains_key(&name) {
-        return Json(serde_json::json!({ "ok": true, "port": profile.listen_port }))
+    if let Some(srv) = running_servers().lock().unwrap().get(&name) {
+        let port = srv.port;
+        return Json(serde_json::json!({ "ok": true, "port": port }))
             .into_response();
     }
     let port = profile.listen_port;
@@ -605,17 +640,27 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
     // bind до ответа: 200 только если порт реально занят
     // 0.0.0.0 — mock доступен и с внешних адресов мака (VPN 10.40-контур зовёт его как 1С);
     // 127.0.0.1-клиенты (preview, внутренние проверки) продолжают работать: 0.0.0.0 покрывает и localhost.
-    let listener = match TcpListener::bind(("0.0.0.0", port)).await {
-        Ok(l) => l,
-        Err(e) => {
-            let msg = format!("bind {port}: {e}");
-            crate::control::log_action(
-                "mock",
-                "start.fail",
-                serde_json::json!({"name": name, "port": port, "error": msg}),
-            );
-            return json_error(&msg, StatusCode::BAD_GATEWAY);
-        }
+    // Каждый профиль поднимает независимый канал: настроенный порт занят —
+    // старт на эфемерном (пользователь, 20.11.2026). Хозяин занятого порта —
+    // тот, кто занял первым; опоздавший профиль получает авто-выданный, он
+    // виден в карточке и в ответе старта.
+    let (listener, actual, auto) = match TcpListener::bind(("0.0.0.0", port)).await {
+        Ok(l) => (l, port, false),
+        Err(first) => match TcpListener::bind(("0.0.0.0", 0)).await {
+            Ok(l) => {
+                let p = l.local_addr().map(|a| a.port()).unwrap_or(0);
+                (l, p, true)
+            }
+            Err(e) => {
+                let msg = format!("bind {port}: {first}; bind auto: {e}");
+                crate::control::log_action(
+                    "mock",
+                    "start.fail",
+                    serde_json::json!({"name": name, "port": port, "error": msg}),
+                );
+                return json_error(&msg, StatusCode::BAD_GATEWAY);
+            }
+        },
     };
     let handle = tokio::spawn(async move {
         run_mock_server(listener, name_clone).await;
@@ -623,10 +668,17 @@ async fn start_handler(Json(body): Json<StartBody>) -> Response {
     crate::control::log_action(
         "mock",
         "start",
-        serde_json::json!({"name": name, "port": port}),
+        serde_json::json!({"name": name, "port": actual, "requested": port, "auto": auto}),
     );
-    running_servers().lock().unwrap().insert(name, handle);
-    Json(serde_json::json!({ "ok": true, "port": port })).into_response()
+    running_servers().lock().unwrap().insert(
+        name,
+        RunningServer {
+            handle,
+            port: actual,
+        },
+    );
+    Json(serde_json::json!({ "ok": true, "port": actual, "requested": port, "auto": auto }))
+        .into_response()
 }
 
 async fn stop_handler(Json(body): Json<StartBody>) -> Response {
@@ -641,20 +693,16 @@ async fn stop_handler(Json(body): Json<StartBody>) -> Response {
 
 async fn stop_server(name: &str) {
     let mut servers = running_servers().lock().unwrap();
-    if let Some(handle) = servers.remove(name) {
-        handle.abort();
+    if let Some(srv) = servers.remove(name) {
+        srv.handle.abort();
     }
 }
 
 async fn status_handler() -> Json<Value> {
     let servers = running_servers().lock().unwrap();
     let running: Vec<_> = servers
-        .keys()
-        .filter_map(|name| {
-            load_profile(name)
-                .ok()
-                .map(|p| serde_json::json!({ "name": name, "port": p.listen_port }))
-        })
+        .iter()
+        .map(|(name, srv)| serde_json::json!({ "name": name, "port": srv.port }))
         .collect();
     Json(serde_json::json!({ "running": running }))
 }
