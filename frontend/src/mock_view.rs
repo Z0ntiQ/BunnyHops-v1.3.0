@@ -311,7 +311,17 @@ pub fn ProxyView() -> impl IntoView {
                 Ok(v) => {
                     if let Some(arr) = v.get("profiles").and_then(|x| x.as_array()) {
                         profiles.set(arr.clone());
-                        if selected_profile.get_untracked().is_none() {
+                        // Выбранный профиль мог исчезнуть из списка (удаление в другом
+                        // месте): выбор не должен оставаться несуществующим. Если не
+                        // выбран или выбранного нет в списке — выделяем первый (20.11.2026).
+                        let sel_alive = selected_profile
+                            .get_untracked()
+                            .as_deref()
+                            .map_or(false, |name| {
+                                arr.iter()
+                                    .any(|p| p.get("name").and_then(|x| x.as_str()) == Some(name))
+                            });
+                        if !sel_alive {
                             if let Some(name) = arr
                                 .first()
                                 .and_then(|p| p.get("name").and_then(|n| n.as_str()))
