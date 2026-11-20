@@ -240,8 +240,13 @@ pub fn ProxyView() -> impl IntoView {
     let status_err = create_rw_signal(false);
     let new_profile_open = create_rw_signal(false);
     let new_profile_name = create_rw_signal(String::new());
+    // «Добавить правило» без профиля: сначала создаём профиль, только потом
+    // правило (пользователь, 20.11.2026). Ручное открытие формы сбрасывает
+    // намерение — это уже отдельный сценарий без цепочки.
+    let pending_rule_after_profile = create_rw_signal(false);
     let open_new_profile = move || {
         new_profile_name.set(String::new());
+        pending_rule_after_profile.set(false);
         new_profile_open.update(|o| *o = !*o);
     };
     crate::debug_bridge::register_click("mock.new_profile", open_new_profile);
@@ -261,24 +266,6 @@ pub fn ProxyView() -> impl IntoView {
     // переключают алфавитный порядок и направление (запрос пользователя 17.11.2026).
     let sort_alpha = create_rw_signal(false);
     let sort_desc = create_rw_signal(false);
-
-    let load_profiles = move || {
-        let order = if sort_alpha.get() { "alpha" } else { "history" };
-        let dir = if sort_desc.get() { "desc" } else { "asc" };
-        spawn_local(async move {
-            match fetch_json_get(&format!("/debug/mock/profiles?order={order}&dir={dir}")).await {
-                Ok(v) => {
-                    if let Some(arr) = v.get("profiles").and_then(|x| x.as_array()) {
-                        profiles.set(arr.clone());
-                    }
-                }
-                Err(e) => {
-                    status_msg.set(e);
-                    status_err.set(true);
-                }
-            }
-        });
-    };
 
     let load_profile = move |name: String| {
         spawn_local(async move {
@@ -302,6 +289,37 @@ pub fn ProxyView() -> impl IntoView {
                     selected_variant_idx.set(None);
                     nav_sel.set(None);
                     open_rule.set(None);
+                }
+                Err(e) => {
+                    status_msg.set(e);
+                    status_err.set(true);
+                }
+            }
+        });
+    };
+
+    // Правила принадлежат профилю: если в списке есть хоть один профиль,
+    // один из них обязан быть активен и выделен (пользователь, 20.11.2026).
+    // Без выбора при загрузке списка активируем первый в списке.
+    let lp_auto = load_profile.clone();
+    let load_profiles = move || {
+        let order = if sort_alpha.get() { "alpha" } else { "history" };
+        let dir = if sort_desc.get() { "desc" } else { "asc" };
+        let lp = lp_auto.clone();
+        spawn_local(async move {
+            match fetch_json_get(&format!("/debug/mock/profiles?order={order}&dir={dir}")).await {
+                Ok(v) => {
+                    if let Some(arr) = v.get("profiles").and_then(|x| x.as_array()) {
+                        profiles.set(arr.clone());
+                        if selected_profile.get_untracked().is_none() {
+                            if let Some(name) = arr
+                                .first()
+                                .and_then(|p| p.get("name").and_then(|n| n.as_str()))
+                            {
+                                lp(name.to_string());
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     status_msg.set(e);
@@ -441,8 +459,20 @@ pub fn ProxyView() -> impl IntoView {
                 Ok(_) => {
                     new_profile_open.set(false);
                     new_profile_name.set(String::new());
+                    // Помечаем новый профиль выбранным до обновления списка:
+                    // авто-выбор в load_profiles не перетянет на первый в списке.
+                    selected_profile.set(Some(sanitized.clone()));
                     load_profiles();
                     load_profile(sanitized);
+                    // Цепочка «сначала профиль, потом правило» (20.11.2026):
+                    // если кнопка правила вела сюда — открываем модалку правила.
+                    if pending_rule_after_profile.get() {
+                        pending_rule_after_profile.set(false);
+                        rule_method_draft.set("*".to_string());
+                        rule_match_draft.set("prefix".to_string());
+                        rule_status_draft.set("200".to_string());
+                        rule_name_open.set(true);
+                    }
                 }
                 Err(e) => {
                     status_msg.set(e);
@@ -480,6 +510,11 @@ pub fn ProxyView() -> impl IntoView {
     // Правило создаётся из модалки: название, метод, тип совпадения и код
     // ответа задаёт пользователь (17.11.2026).
     let add_rule = move |method: String, match_type: String, status: u64| {
+        // Правило принадлежит профилю: без выбранного профиля добавлять некуда
+        // (пользователь, 20.11.2026).
+        if selected_profile.get().is_none() {
+            return;
+        }
         // Название — автоматически по коду из таблицы статусов REST.
         let label = status_label(status);
         let mut r = rules.get();
@@ -810,6 +845,15 @@ pub fn ProxyView() -> impl IntoView {
         |title: &'static str| -> AnyView { view! { <div class="px-h">{title}</div> }.into_any() };
     let pick_cb: Callback<NavSel> = Callback::new(move |sel: NavSel| pick(sel));
     let add_rule_cb: Callback<()> = Callback::new(move |_: ()| {
+        // Правило имеет смысл только для выбранного профиля (пользователь,
+        // 20.11.2026): если профиля ещё нет — кнопка сначала ведёт к созданию
+        // профиля, и только после него к созданию правила.
+        if selected_profile.get().is_none() {
+            pending_rule_after_profile.set(true);
+            new_profile_name.set(String::new());
+            new_profile_open.set(true);
+            return;
+        }
         // «+» открывает модалку с типом и кодом; название — по коду (17.11.2026).
         rule_method_draft.set("*".to_string());
         rule_match_draft.set("prefix".to_string());
@@ -1218,7 +1262,7 @@ pub fn ProxyView() -> impl IntoView {
                             } />
                         <div style="display:flex;gap:6px;margin-top:6px">
                             <button data-bh="profile.create" class="px-btn" on:click=move |_| create_profile()>"Создать"</button>
-                            <button data-bh="profile.create_cancel" class="px-btn" on:click=move |_| new_profile_open.set(false)>"Отмена"</button>
+                            <button data-bh="profile.create_cancel" class="px-btn" on:click=move |_| { new_profile_open.set(false); pending_rule_after_profile.set(false); }>"Отмена"</button>
                         </div>
                     </div>
                 </Show>
@@ -1234,14 +1278,23 @@ pub fn ProxyView() -> impl IntoView {
                         children=move |p| {
                             let name = p.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
                             let running = p.get("running").and_then(|x| x.as_bool()).unwrap_or(false);
-                            let is_active = selected_profile.get().as_deref() == Some(&name);
-                            let mut item_cls = String::from("px-item");
-                            if is_active {
-                                item_cls.push_str(" active");
-                            }
+                            // Класс строки реактивный: статическая строка не
+                            // перерисовывалась при смене выбора — выделение
+                            // пропало (инцидент пользователя 20.11.2026).
+                            let name_cls = name.clone();
+                            let mut base_cls = String::from("px-item");
                             if running {
-                                item_cls.push_str(" running");
+                                base_cls.push_str(" running");
                             }
+                            let item_cls = move || {
+                                let mut cls = base_cls.clone();
+                                if selected_profile.get().as_deref()
+                                    == Some(name_cls.as_str())
+                                {
+                                    cls.push_str(" active");
+                                }
+                                cls
+                            };
                             let dot_cls = if running { "px-dot on" } else { "px-dot" };
                             let pp_cls = if running { "px-pp on" } else { "px-pp" };
                             let pp_title = if running { "Остановить" } else { "Запустить" };
