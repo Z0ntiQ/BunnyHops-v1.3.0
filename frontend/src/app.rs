@@ -100,6 +100,9 @@ pub fn App() -> impl IntoView {
     let body = RwSignal::new(String::new());
     let tab = RwSignal::new("params".to_string());
     let mock_mode = RwSignal::new(false);
+    // Настоящее состояние макирования: кнопка «Мок» не должна показывать ON,
+    // пока ни один мок-профиль не запущен (отчёт пользователя 20.11.2026).
+    let mock_running = RwSignal::new(false);
     let resp_tab = RwSignal::new("body".to_string());
     let pretty = RwSignal::new(true);
     let loading = RwSignal::new(false);
@@ -191,6 +194,48 @@ pub fn App() -> impl IntoView {
     // ----- Debug-мост: живое состояние формы запроса для тестовых инструментов -----
     let debug_on = RwSignal::new(false);
     let toggle_mock = move || mock_mode.update(|m| *m = !*m);
+    // Пока режим включён, опрашиваем список профилей каждые 2 секунды: состояние
+    // кнопки выводится из фактического флага running, а не из факта нажатия.
+    // При выключении режима эффект пересобирается и снимает интервал
+    // (id = 0 означает «интервала нет»).
+    Effect::new(move |prev: Option<i32>| -> i32 {
+        if let Some(id) = prev.filter(|id| *id != 0) {
+            if let Some(w) = web_sys::window() {
+                w.clear_interval_with_handle(id);
+            }
+        }
+        if !mock_mode.get() {
+            mock_running.set(false);
+            return 0;
+        }
+        let poll = move || {
+            spawn_local(async move {
+                let any = debug_bridge::api_get("/debug/mock/profiles")
+                    .await
+                    .ok()
+                    .and_then(|v| {
+                        v.get("profiles").and_then(|p| p.as_array()).map(|arr| {
+                            arr.iter().any(|p| {
+                                p.get("running").and_then(|r| r.as_bool()) == Some(true)
+                            })
+                        })
+                    })
+                    .unwrap_or(false);
+                mock_running.set(any);
+            });
+        };
+        poll();
+        let cb = Closure::wrap(Box::new(poll) as Box<dyn FnMut()>);
+        let id = web_sys::window().and_then(|w| {
+            w.set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                2000,
+            )
+            .ok()
+        });
+        cb.forget();
+        id.unwrap_or(0)
+    });
     let toggle_debug = move || {
         let on = !debug_on.get_untracked();
         debug_on.set(on);
@@ -1326,12 +1371,24 @@ pub fn App() -> impl IntoView {
                         <img class="brand-icon" src="/brand.png" alt="" />
                         <span class="brand-name">"Bunny\u{a0}Hops"</span>
                     </div>
-                    <button data-bh="topbar.mock_toggle" class={move || if mock_mode.get() { "mode-toggle m-first on" } else { "mode-toggle m-first" }}
-                        title="Mock-сервер (BunnyProx)"
+                    <button data-bh="topbar.mock_toggle" class={move || match (mock_mode.get(), mock_running.get()) {
+                            (false, _) => "mode-toggle m-first",
+                            (true, true) => "mode-toggle m-first on",
+                            (true, false) => "mode-toggle m-first wait",
+                        }}
+                        title={move || match (mock_mode.get(), mock_running.get()) {
+                            (false, _) => "Mock-сервер (BunnyProx): выключен",
+                            (true, true) => "Mock-сервер (BunnyProx): макирование работает — запущен минимум один мок-профиль",
+                            (true, false) => "Mock-сервер включён, но ни один мок-профиль не запущен: макирования пока нет",
+                        }}
                         on:click=move |_| toggle_mock()>
                         <span class="mode-lamp" aria-hidden="true"></span>
                         { "Mock" }
-                        <span class="mode-st">{move || if mock_mode.get() { "ON" } else { "OFF" }}</span>
+                        <span class="mode-st">{move || match (mock_mode.get(), mock_running.get()) {
+                            (false, _) => "OFF",
+                            (true, true) => "ON",
+                            (true, false) => "…",
+                        }}</span>
                     </button>
                     <button data-bh="topbar.mcp_toggle" class={move || if debug_on.get() { "mode-toggle on" } else { "mode-toggle" }}
                         title="MCP-гейт: API для тестовых инструментов (/api/debug-mode, /debug/*)"

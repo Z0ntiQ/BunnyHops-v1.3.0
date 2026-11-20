@@ -113,8 +113,25 @@ body {
               0 0 18px 4px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .mode-toggle.on .mode-st { color: var(--accent); opacity: 1; }
+/* Настоящее состояние макирования (отчёт пользователя 20.11.2026):
+   wait — режим включён, но ни один мок-профиль не запущен: кнопка НЕ заявляет
+   ON, только мигающая лампа и многоточие вместо статуса;
+   on + запущенный профиль — по оранжевой рамке бежит луч, тот же сигнал,
+   что у строки запущенного мок-профиля (px-item.running). */
+.mode-toggle.wait {
+  border-color: color-mix(in srgb, var(--orange) 40%, transparent);
+  color: var(--text);
+}
+.mode-toggle.wait .mode-lamp {
+  background: var(--orange);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.mode-toggle.wait .mode-st { color: var(--orange); opacity: 1; }
+.mode-toggle.m-first.on { position: relative; }
+.mode-toggle.m-first.on::before { content: ""; position: absolute; inset: -1px; border-radius: var(--radius-pill); padding: 1.5px; background: conic-gradient(from var(--px-a), transparent 0 58%, rgba(255, 106, 0, .25) 72%, var(--orange) 84%, rgba(255, 106, 0, .25) 93%, transparent 100%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: px-beam 2.6s linear infinite; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .mode-toggle, .mode-toggle .mode-lamp { transition: none; }
+  .mode-toggle.wait .mode-lamp, .mode-toggle.m-first.on::before { animation: none; }
 }
 .topbar-sep {
   width: 1px;
