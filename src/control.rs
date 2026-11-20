@@ -150,6 +150,11 @@ const POLL_GETS: &[&str] = &[
     "/api/automation-rules",
 ];
 
+// Пульс карты BROOP: UI шлёт библиотеку элементов каждые 2 с (debug_bridge).
+// Рутинный фоновый POST, смысловой ценности в журнале нет — как POLL_GETS.
+// Ошибки на этих путях пишутся всегда (условие !success в мидлваре).
+const PULSE_POSTS: &[&str] = &["/debug/elements"];
+
 const SEMANTIC: &[&str] = &[
     "/proxy",
     "/debug/request",
@@ -181,8 +186,9 @@ pub async fn api_access_middleware(req: Request, next: axum::middleware::Next) -
     let status = response.status();
     let success = status.is_success();
     let polled = method == Method::GET && POLL_GETS.contains(&path.as_str());
+    let pulsed = method == Method::POST && PULSE_POSTS.contains(&path.as_str());
     let semantic = SEMANTIC.contains(&path.as_str());
-    if !success || !(polled || semantic) {
+    if !success || !(polled || pulsed || semantic) {
         log_action(
             "api",
             &format!("{method} {path}"),
