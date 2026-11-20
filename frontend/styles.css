@@ -2020,17 +2020,56 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
   background: var(--bg-panel);
   color: var(--text-dim);
   display: flex; flex-direction: column;
-  /* выплывание вверх при открытии: панель едет снизу (из-за нижнего края) на своё место.
-     Играет один раз на монтирование (<Show>); ресайз за грип высоту меняет без ремонта — анимация не повторяется. */
-  animation: actlog-up .26s cubic-bezier(.22, .9, .34, 1) both;
+  /* плавное выплывание вверх при открытии: панель выезжает снизу (из-за нижнего края)
+     и одновременно проявляется. Играет на каждом монтировании (<Show>): каждый клик
+     по «Logs»/«Трафик» открывает панель движением; ресайз за грип высоту меняет без
+     ремонта — анимация не повторяется. */
+  animation: actlog-up .3s cubic-bezier(.22, .9, .34, 1) both;
 }
 @keyframes actlog-up {
-  from { transform: translateY(calc(100% + 30px)); } /* 30px = отступ дока: старт полностью за нижним краем */
-  to   { transform: translateY(0); }
+  from { transform: translateY(calc(100% + 30px)); opacity: 0; } /* 30px = отступ дока: старт полностью за нижним краем */
+  to   { transform: translateY(0); opacity: 1; }
 }
+/* сниженная анимация: без движения, но не мгновенный «щелчок» — лёгкое проявление */
 @media (prefers-reduced-motion: reduce) {
-  .actlog { animation: none; }
+  .actlog { animation: actlog-fade .18s ease both; }
 }
+@keyframes actlog-fade {
+  from { opacity: 0; }
+}
+/* шапка консоли: имя панели и «Очистить» (20.11.2026) */
+.actlog-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.actlog-title {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.actlog-clear {
+  flex: none;
+  height: 22px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.actlog-clear:hover { color: var(--accent); border-color: var(--accent); }
+.actlog-clear:active { filter: brightness(0.85); }
 .actlog-resize {
   flex: none;
   height: 10px;
@@ -2047,11 +2086,12 @@ mark.search-mark-focus { outline: 2px solid #f0a500; }
   background-repeat: no-repeat;
 }
 .actlog-resize:hover { opacity: 1; }
+/* тело консоли: скролл; новые строки сверху, прокрутка сохраняется при обновлениях */
 .actlog-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-3) var(--space-3) var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-3);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--fs-caption);
   line-height: 15px;

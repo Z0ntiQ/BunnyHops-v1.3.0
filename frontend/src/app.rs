@@ -20,6 +20,18 @@ use crate::timefmt::*;
 use crate::types::*;
 use crate::util::*;
 
+/* «Очистить» в консолях (20.11.2026): строки несут префикс времени «ЧЧ:ММ:СС»
+   (и локальный logit, и серверные /debug/logs и /debug/mock/traffic). Очистка
+   запоминает момент и прячет на рендере всё, что старше, — сами серверные
+   журналы и опрос не трогаются, новые строки продолжают появляться. */
+fn line_hidden(line: &str, cut: &str) -> bool {
+    if cut.is_empty() {
+        return false;
+    }
+    let ts = line.get(..8).unwrap_or(line);
+    ts <= cut
+}
+
 #[component]
 
 pub fn App() -> impl IntoView {
@@ -111,6 +123,8 @@ pub fn App() -> impl IntoView {
     // короткий лог действий в подвале: что упало и на каком шаге
     let act_log = RwSignal::new(Vec::<String>::new());
     let log_open = RwSignal::new(false);
+    // момент нажатия «Очистить» в журнале: строки старше скрываются на рендере
+    let log_clear_at = RwSignal::new(String::new());
     let log_h = RwSignal::new(
         ls_get(LS_LOG_H)
             .and_then(|v| v.parse::<i32>().ok())
@@ -147,6 +161,8 @@ pub fn App() -> impl IntoView {
     // панель «Трафик»: все запросы mock-движка по всем профилям; опрос всегда.
     let trf_log = RwSignal::new(Vec::<String>::new());
     let trf_open = RwSignal::new(false);
+    // момент нажатия «Очистить» в трафике: старше — скрыть на рендере
+    let trf_clear_at = RwSignal::new(String::new());
     let trf_h = RwSignal::new(
         ls_get(LS_TRF_H)
             .and_then(|v| v.parse::<i32>().ok())
@@ -2268,7 +2284,10 @@ pub fn App() -> impl IntoView {
                         log_open.update(|o| *o = !*o);
                     }>
                     "Logs"
-                    <span class="actlog-count">{move || act_log.get().len()}</span>
+                    <span class="actlog-count">{move || {
+                        let cut = log_clear_at.get();
+                        act_log.get().iter().filter(|l| !line_hidden(l.as_str(), &cut)).count()
+                    }}</span>
                 </button>
                 <button data-bh="bottom.traffic_toggle" class="actlog-toggle"
                     on:click=move |_| {
@@ -2279,7 +2298,10 @@ pub fn App() -> impl IntoView {
                         trf_open.update(|o| *o = !*o);
                     }>
                     "Трафик"
-                    <span class="actlog-count">{move || trf_log.get().len()}</span>
+                    <span class="actlog-count">{move || {
+                        let cut = trf_clear_at.get();
+                        trf_log.get().iter().filter(|l| !line_hidden(l.as_str(), &cut)).count()
+                    }}</span>
                 </button>
                 </div>
                 <Show when=move || log_open.get()>
@@ -2292,9 +2314,21 @@ pub fn App() -> impl IntoView {
                             on:pointerdown=move |ev: web_sys::PointerEvent| {
                                 crate::ui::start_log_drag(&ev, log_h);
                             }></div>
+                        <div class="actlog-head">
+                            <span class="actlog-title">"Журнал"</span>
+                            <button data-bh="actlog.clear_logs" class="actlog-clear"
+                                title="Скрыть строки до текущего момента; новые продолжат появляться"
+                                on:click=move |_| log_clear_at.set(ts_short())>"Очистить"</button>
+                        </div>
                         <div class="actlog-body">
                             {move || {
-                                let v: Vec<String> = act_log.get().into_iter().rev().take(100).collect();
+                                let cut = log_clear_at.get();
+                                let v: Vec<String> = act_log.get()
+                                    .into_iter()
+                                    .filter(|l| !line_hidden(l, &cut))
+                                    .rev()
+                                    .take(100)
+                                    .collect();
                                 v.into_iter()
                                     .map(|line| view! { <div class="actlog-line">{line}</div> })
                                     .collect::<Vec<_>>()
@@ -2312,9 +2346,21 @@ pub fn App() -> impl IntoView {
                             on:pointerdown=move |ev: web_sys::PointerEvent| {
                                 crate::ui::start_log_drag(&ev, trf_h);
                             }></div>
+                        <div class="actlog-head">
+                            <span class="actlog-title">"Трафик"</span>
+                            <button data-bh="actlog.clear_traffic" class="actlog-clear"
+                                title="Скрыть записи до текущего момента; новые продолжат появляться"
+                                on:click=move |_| trf_clear_at.set(ts_short())>"Очистить"</button>
+                        </div>
                         <div class="actlog-body">
                             {move || {
-                                let v: Vec<String> = trf_log.get().into_iter().rev().take(200).collect();
+                                let cut = trf_clear_at.get();
+                                let v: Vec<String> = trf_log.get()
+                                    .into_iter()
+                                    .filter(|l| !line_hidden(l, &cut))
+                                    .rev()
+                                    .take(200)
+                                    .collect();
                                 v.into_iter()
                                     .map(|line| view! { <div class="actlog-line">{line}</div> })
                                     .collect::<Vec<_>>()
