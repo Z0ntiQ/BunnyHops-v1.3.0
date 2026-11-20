@@ -34,6 +34,17 @@ pub fn tab_bottom_gap() -> Option<i32> {
     Some((inner_h - 30 - rect.bottom() as i32).max(60))
 }
 
+/// Высота по умолчанию для панелей журнала/трафика: пол-экрана (20.11.2026 —
+/// пользователь: «выезжала на пол-экрана, сейчас слишком узкая»). Ресайз-грип
+/// и сохранённая в localStorage высота по-прежнему важнее дефолта.
+pub fn half_viewport_h() -> i32 {
+    web_sys::window()
+        .and_then(|w| w.inner_height().ok())
+        .and_then(|v| v.as_f64())
+        .map(|h| (h as i32) / 2)
+        .unwrap_or(450)
+}
+
 pub(crate) fn ls_set(key: &str, value: &str) {
     if let Some(Some(store)) = web_sys::window().and_then(|w| w.local_storage().ok()) {
         let _ = store.set_item(key, value);

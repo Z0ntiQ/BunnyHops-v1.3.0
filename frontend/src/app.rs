@@ -128,7 +128,7 @@ pub fn App() -> impl IntoView {
     let log_h = RwSignal::new(
         ls_get(LS_LOG_H)
             .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(150),
+            .unwrap_or_else(crate::storage::half_viewport_h),
     );
     let logit = move |msg: String| {
         let line = format!("{} {}", ts_short(), msg);
@@ -166,7 +166,7 @@ pub fn App() -> impl IntoView {
     let trf_h = RwSignal::new(
         ls_get(LS_TRF_H)
             .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(150),
+            .unwrap_or_else(crate::storage::half_viewport_h),
     );
     let _ = Effect::new(move |_| {
         spawn_local(async move {
@@ -2278,7 +2278,6 @@ pub fn App() -> impl IntoView {
                 <button data-bh="bottom.logs_toggle" class="actlog-toggle"
                     on:click=move |_| {
                         if !log_open.get_untracked() {
-                            log_h.set(60);
                             trf_open.set(false);
                         }
                         log_open.update(|o| *o = !*o);
@@ -2292,7 +2291,6 @@ pub fn App() -> impl IntoView {
                 <button data-bh="bottom.traffic_toggle" class="actlog-toggle"
                     on:click=move |_| {
                         if !trf_open.get_untracked() {
-                            trf_h.set(60);
                             log_open.set(false);
                         }
                         trf_open.update(|o| *o = !*o);
