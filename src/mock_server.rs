@@ -450,7 +450,14 @@ async fn gateway_handler(State(profile_name): State<String>, req: Request) -> Re
 }
 
 async fn proxy_upstream(upstream: &str, method: Method, path: String, req: Request) -> Response {
-    let client = Client::new();
+    // как в основной сервер: переменные *_PROXY чужих процессов не уводят апстрим-запрос
+    let client = match Client::builder().no_proxy().build() {
+        Ok(c) => c,
+        Err(_) => return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(r#"{"error":"proxy client unavailable"}"#))
+            .unwrap(),
+    };
     let url = format!("{upstream}{path}");
     let mut builder = client.request(method.clone(), &url);
 

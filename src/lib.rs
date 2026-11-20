@@ -417,6 +417,9 @@ pub async fn run_server(
     let dist_str = dist.display().to_string();
 
     let client = reqwest::Client::builder()
+        // Прямное подключение: переменные *_PROXY чужих процессов (opencode-мост)
+        // не должны уводить запросы пользователя с сохранённых вкладок.
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::limited(10))
         // Как браузер: висящее соединение не должно держать лоадер вечно.
         .connect_timeout(std::time::Duration::from_secs(10))
