@@ -50,6 +50,9 @@ pub fn App() -> impl IntoView {
         hop_search("");
         search_open.set(false);
     };
+    /* ---------- меню «все вкладки»: коллекция может быть большой ---------- */
+    let tabs_menu_open = RwSignal::new(false);
+    let tabs_filter = RwSignal::new(String::new());
     let url = RwSignal::new(String::new());
     // Живой плейсхолдер URL-поля (17.11.2026): подсказка печатается, когда поле пустое.
     let ph_hint = RwSignal::new(String::new());
@@ -1274,6 +1277,21 @@ pub fn App() -> impl IntoView {
         );
         resp_snap = false;
     });
+    // активная вкладка всегда в кадре: лента подтягивается к ней минимальным сдвигом
+    // (scrollIntoView(false) = block:end + inline:nearest — вертикально страница не скроллится)
+    Effect::new(move |_| {
+        let _ = active_tab.get();
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        if let Some(el) = doc
+            .query_selector(".tab-strip .tab-chip.active")
+            .ok()
+            .flatten()
+        {
+            let _ = el.scroll_into_view_with_bool(false);
+        }
+    });
 
     /* ---------- render (1:1 с App.jsx) ---------- */
     let url_preview_m = Memo::new(move |_| url_preview(&url.get(), &vars_map.get()));
@@ -1292,91 +1310,21 @@ pub fn App() -> impl IntoView {
                         <img class="brand-icon" src="/brand.png" alt="" />
                         <span class="brand-name">"Bunny\u{a0}Hops"</span>
                     </div>
-                    <button data-bh="topbar.mock_toggle" class="tab-add"
+                    <button data-bh="topbar.mock_toggle" class={move || if mock_mode.get() { "mode-toggle m-first on" } else { "mode-toggle m-first" }}
                         title="Mock-сервер (BunnyProx)"
-                        style=move || if mock_mode.get() {
-                            "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
-                        } else {
-                            "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
-                        }
-                        on:click=move |_| toggle_mock()>{ "Mock" }</button>
-                    <button data-bh="topbar.mcp_toggle" class="tab-add"
-                        title="MCP-гейт: API для тестовых инструментов (/api/debug-mode, /debug/*)"
-                        style=move || if debug_on.get() {
-                            "width:auto;padding:0 12px;font-weight:600;font-size:12px;background:var(--accent-dim);color:var(--accent)".to_string()
-                        } else {
-                            "width:auto;padding:0 12px;font-weight:600;font-size:12px".to_string()
-                        }
-                        on:click=move |_| toggle_debug()>{ "MCP" }</button>
-                    <button data-bh="topbar.tab_save" class={move || if invite_save.get() {
-                            "tab-add invite".to_string()
-                        } else {
-                            "tab-add".to_string()
-                        }}
-                        title="Сохранить текущий запрос как вкладку"
-                        on:click=move |_| open_modal.run(())>
-                        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                            <path d="M11 4v14M4 11h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
-                        </svg>
+                        on:click=move |_| toggle_mock()>
+                        <span class="mode-lamp" aria-hidden="true"></span>
+                        { "Mock" }
+                        <span class="mode-st">{move || if mock_mode.get() { "ON" } else { "OFF" }}</span>
                     </button>
-                    <div class="tab-cloud">
-                        <Show when={move || !api_calls.get().is_empty()}>
-                            <span class="tab-chip tech">
-                                <button data-bh="topbar.api_cloud" class="tab-chip-open"
-                                    on:click={move |_| {
-                                        api_panel.update(|v| *v = !*v);
-                                        refresh_api.run(());
-                                    }}>
-                                    <span class="tab-chip-name">"automation_rules"</span>
-                                </button>
-                                <span class="api-count">{move || api_calls.get().len()}</span>
-                            </span>
-                        </Show>
-                        <For
-                            each={move || saved.get().into_iter().collect::<Vec<_>>()}
-                            key={|r| r.id.clone()}
-                            children={move |r| {
-                                let id = r.id.clone();
-                                // живые данные чипа читаем из saved — автосохранение обновляет их на месте
-                                let cur = {
-                                    let id = id.clone();
-                                    std::sync::Arc::new(move || {
-                                        saved
-                                            .get()
-                                            .into_iter()
-                                            .find(|x| x.id == id)
-                                            .unwrap_or_else(|| r.clone())
-                                    })
-                                };
-                                let cur_cls = std::sync::Arc::clone(&cur);
-                                let cur_title = std::sync::Arc::clone(&cur);
-                                let cur_name = std::sync::Arc::clone(&cur);
-                                let id_cls = id.clone();
-                                view! {
-                                    <span class={move || {
-                                        let r = cur_cls();
-                                        let mut c = format!("tab-chip m-{}", r.method);
-                                        if active_tab.get().as_deref() == Some(id_cls.as_str()) {
-                                            c.push_str(" active");
-                                        }
-                                        if let Some((fid, t)) = flash.get() {
-                                            if fid == id_cls {
-                                                c.push_str(&format!(" flash{}", t % 2));
-                                            }
-                                        }
-                                        c
-                                    }} title={move || cur_title().url}>
-                                        <button data-bh=format!("tab.chip.{id}") class="tab-chip-open"
-                                            on:click={let id = id.clone(); move |_| load_saved_req.run(id.clone())}>
-                                            <span class="tab-chip-name">{move || cur_name().name}</span>
-                                        </button>
-                                        <button data-bh=format!("tab.delete.{id}") class="tab-chip-del" title="Удалить"
-                                            on:click={let id = id.clone(); move |_| del_confirm.set(Some(id.clone()))}>"✕"</button>
-                                    </span>
-                                }
-                            }}
-                        />
-                    </div>
+                    <button data-bh="topbar.mcp_toggle" class={move || if debug_on.get() { "mode-toggle on" } else { "mode-toggle" }}
+                        title="MCP-гейт: API для тестовых инструментов (/api/debug-mode, /debug/*)"
+                        on:click=move |_| toggle_debug()>
+                        <span class="mode-lamp" aria-hidden="true"></span>
+                        { "MCP" }
+                        <span class="mode-st">{move || if debug_on.get() { "ON" } else { "OFF" }}</span>
+                    </button>
+                    <span class="topbar-sep" aria-hidden="true"></span>
 
                     <div class=move || format!("cmd-search {}", if search_open.get() { "cmd-open" } else if mac { "cmd-mac" } else { "cmd-pc" })>
                         <Show when={move || !search_open.get()}>
@@ -1430,6 +1378,181 @@ pub fn App() -> impl IntoView {
                         </Show>
                     </div>
                 </header>
+                <nav class="tab-strip" aria-label="Вкладки сохранённых запросов">
+                    <button data-bh="topbar.tab_save" class={move || if invite_save.get() {
+                            "tab-add invite".to_string()
+                        } else {
+                            "tab-add".to_string()
+                        }}
+                        title="Сохранить текущий запрос как вкладку"
+                        on:click=move |_| open_modal.run(())>
+                        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                            <path d="M11 4v14M4 11h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+                        </svg>
+                    </button>
+                    <div class="tab-scroll">
+                        <div class="tab-cloud">
+                            <Show when={move || saved.get().is_empty()}>
+                                <div class="strip-empty" aria-hidden="true">
+                                    <span class="strip-empty-dash"></span>
+                                    "Сохранённых вкладок нет — кнопка «+» сохранит текущий запрос"
+                                    <span class="strip-empty-dash"></span>
+                                </div>
+                            </Show>
+                            <For
+                                each={move || saved.get().into_iter().collect::<Vec<_>>()}
+                                key={|r| r.id.clone()}
+                                children={move |r| {
+                                    let id = r.id.clone();
+                                    // живые данные чипа читаем из saved — автосохранение обновляет их на месте
+                                    let cur = {
+                                        let id = id.clone();
+                                        std::sync::Arc::new(move || {
+                                            saved
+                                                .get()
+                                                .into_iter()
+                                                .find(|x| x.id == id)
+                                                .unwrap_or_else(|| r.clone())
+                                        })
+                                    };
+                                    let cur_cls = std::sync::Arc::clone(&cur);
+                                    let cur_title = std::sync::Arc::clone(&cur);
+                                    let cur_name = std::sync::Arc::clone(&cur);
+                                    let id_cls = id.clone();
+                                    view! {
+                                        <span class={move || {
+                                            let r = cur_cls();
+                                            let mut c = format!("tab-chip m-{}", r.method);
+                                            if active_tab.get().as_deref() == Some(id_cls.as_str()) {
+                                                c.push_str(" active");
+                                            }
+                                            if let Some((fid, t)) = flash.get() {
+                                                if fid == id_cls {
+                                                    c.push_str(&format!(" flash{}", t % 2));
+                                                }
+                                            }
+                                            c
+                                        }} title={move || cur_title().url}>
+                                            <button data-bh=format!("tab.chip.{id}") class="tab-chip-open"
+                                                on:click={let id = id.clone(); move |_| load_saved_req.run(id.clone())}>
+                                                <span class="tab-chip-name">{move || cur_name().name}</span>
+                                            </button>
+                                            <button data-bh=format!("tab.delete.{id}") class="tab-chip-del" title="Удалить"
+                                                on:click={let id = id.clone(); move |_| del_confirm.set(Some(id.clone()))}>"✕"</button>
+                                        </span>
+                                    }
+                                }}
+                            />
+                        </div>
+                    </div>
+                    <Show when={move || !api_calls.get().is_empty()}>
+                        <span class="tab-chip tech pinned">
+                            <button data-bh="topbar.api_cloud" class="tab-chip-open"
+                                on:click={move |_| {
+                                    api_panel.update(|v| *v = !*v);
+                                    refresh_api.run(());
+                                }}>
+                                <span class="tab-chip-name">"automation_rules"</span>
+                            </button>
+                            <span class="api-count">{move || api_calls.get().len()}</span>
+                        </span>
+                    </Show>
+                    <Show when={move || !saved.get().is_empty()}>
+                        <button data-bh="topbar.tabs_menu" class="tabs-menu-btn"
+                            title="Все вкладки — вся коллекция с поиском"
+                            on:click=move |_| tabs_menu_open.update(|v| *v = !*v)>
+                            <span class="tabs-menu-cnt">{move || saved.get().len()}</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                    </Show>
+                    <Show when={move || tabs_menu_open.get()}>
+                        <div class="method-menu-backdrop" on:click=move |_| tabs_menu_open.set(false)></div>
+                        <div class="tabs-menu">
+                            <input data-bh="topbar.tabs_filter" class="tabs-menu-search" type="text"
+                                placeholder="Фильтр по имени или URL"
+                                value=move || tabs_filter.get()
+                                on:input=move |ev| tabs_filter.set(input_value(ev))
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "Escape" {
+                                        tabs_menu_open.set(false);
+                                    }
+                                }
+                            />
+                            <div class="tabs-menu-list">
+                                <For
+                                    each={move || {
+                                        let q = tabs_filter.get().to_lowercase();
+                                        saved
+                                            .get()
+                                            .into_iter()
+                                            .filter(|r| {
+                                                q.is_empty()
+                                                    || r.name.to_lowercase().contains(&q)
+                                                    || r.url.to_lowercase().contains(&q)
+                                            })
+                                            .collect::<Vec<_>>()
+                                    }}
+                                    key={|r| r.id.clone()}
+                                    children={move |r| {
+                                        let id = r.id.clone();
+                                        // живые данные строки читаем из saved — как у чипов ленты
+                                        let cur = {
+                                            let id = id.clone();
+                                            std::sync::Arc::new(move || {
+                                                saved
+                                                    .get()
+                                                    .into_iter()
+                                                    .find(|x| x.id == id)
+                                                    .unwrap_or_else(|| r.clone())
+                                            })
+                                        };
+                                        let cur_cls = std::sync::Arc::clone(&cur);
+                                        let cur_name = std::sync::Arc::clone(&cur);
+                                        let cur_url = std::sync::Arc::clone(&cur);
+                                        let cur_url_span = std::sync::Arc::clone(&cur);
+                                        let id_cls = id.clone();
+                                        view! {
+                                            <button data-bh=format!("tab.pick.{id}") class=move || {
+                                                let r = cur_cls();
+                                                let mut c = format!("tabs-menu-item m-{}", r.method);
+                                                if active_tab.get().as_deref() == Some(id_cls.as_str()) {
+                                                    c.push_str(" active");
+                                                }
+                                                c
+                                            }
+                                                title={move || cur_url().url}
+                                                on:click={let id = id.clone(); move |_| {
+                                                    load_saved_req.run(id.clone());
+                                                    tabs_menu_open.set(false);
+                                                }}>
+                                                <span class="tabs-menu-dot" aria-hidden="true"></span>
+                                                <span class="tabs-menu-name">{move || cur_name().name}</span>
+                                                <span class="tabs-menu-url">{move || cur_url_span().url}</span>
+                                            </button>
+                                        }
+                                    }}
+                                />
+                                <Show when={move || {
+                                    let q = tabs_filter.get().to_lowercase();
+                                    !q.is_empty()
+                                        && saved
+                                            .get()
+                                            .into_iter()
+                                            .filter(|r| {
+                                                q.is_empty()
+                                                    || r.name.to_lowercase().contains(&q)
+                                                    || r.url.to_lowercase().contains(&q)
+                                            })
+                                            .count()
+                                            == 0
+                                }}>
+                                    <div class="tabs-menu-empty">"Ничего не найдено"</div>
+                                </Show>
+                            </div>
+                            <div class="tabs-menu-foot">"Клик — открыть вкладку · Esc — закрыть"</div>
+                        </div>
+                    </Show>
+                </nav>
                 <Show when={move || !groups.get().is_empty()}>
                     <div class="group-bar">
                         {move || {
