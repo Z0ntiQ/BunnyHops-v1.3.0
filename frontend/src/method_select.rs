@@ -7,13 +7,13 @@ use leptos::prelude::*;
 /// Цвет точки-маркера метода (тёмный фон, яркие тона как в референсе).
 pub fn method_dot_color(m: &str) -> &'static str {
     match m {
-        "GET" => "#21c363",
-        "POST" => "#ff9f0a",
-        "PUT" => "#3ec9ff",
-        "PATCH" => "#c69bff",
-        "DELETE" => "#ff5a5f",
-        "HEAD" => "#7aa2c9",
-        _ => "#9a9a9a",
+        "GET" => "#3bb273",
+        "POST" => "#eaa53f",
+        "PUT" => "#41b2de",
+        "PATCH" => "#8f7bff",
+        "DELETE" => "#ef5d5d",
+        "HEAD" => "#6e7f96",
+        _ => "#6e7f96",
     }
 }
 
